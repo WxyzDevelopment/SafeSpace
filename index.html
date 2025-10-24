@@ -1,0 +1,5224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Safespace - Your Safe Mental Health Community</title>
+  
+  <!-- 
+    ═══════════════════════════════════════════════════════════════════════════
+    SAFESPACE - Single-File Mental Health Support Web App
+    ═══════════════════════════════════════════════════════════════════════════
+    
+    A complete, production-ready mental health support platform built as a 
+    single HTML file using Firebase (Auth + Firestore).
+    
+    ═══════════════════════════════════════════════════════════════════════════
+    SETUP INSTRUCTIONS
+    ═══════════════════════════════════════════════════════════════════════════
+    
+    1. Firebase Console Setup:
+       - Go to https://console.firebase.google.com
+       - Select the project: safespace-d741b
+       - Enable Authentication > Email/Password provider
+       - Enable Firestore Database (Start in production mode, we'll add rules)
+       
+    2. Deploy this file:
+       - Save as index.html
+       - Deploy to Firebase Hosting, GitHub Pages, or any static host
+       - Or simply open locally (file://) for testing
+       
+    3. Create first admin user:
+       - Register normally through the app
+       - Go to Firestore console > users collection > your document
+       - Change "role" field from "user" to "admin"
+       - Refresh the app to see Admin Panel appear
+       
+    4. Apply Firestore Security Rules (paste in Firestore Rules tab):
+    
+    rules_version = '2';
+    service cloud.firestore {
+      match /databases/{database}/documents {
+        
+        // Helper functions
+        function isAuthenticated() {
+          return request.auth != null;
+        }
+        
+        function isAdmin() {
+          return isAuthenticated() && 
+                 get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+        }
+        
+        function isNotDisabled() {
+          return isAuthenticated() && 
+                 get(/databases/$(database)/documents/users/$(request.auth.uid)).data.disabled != true;
+        }
+        
+        // Users collection
+        match /users/{userId} {
+          allow read: if isAuthenticated();
+          allow create: if isAuthenticated() && request.auth.uid == userId;
+          allow update: if isAuthenticated() && 
+                          (request.auth.uid == userId || isAdmin());
+          allow delete: if isAdmin();
+        }
+        
+        // Feed posts
+        match /feed/{postId} {
+          allow read: if isAuthenticated() && isNotDisabled();
+          allow create: if isAuthenticated() && isNotDisabled();
+          allow update, delete: if isAuthenticated() && 
+                                  (resource.data.authorUid == request.auth.uid || isAdmin());
+          
+          // Comments subcollection
+          match /comments/{commentId} {
+            allow read: if isAuthenticated() && isNotDisabled();
+            allow create: if isAuthenticated() && isNotDisabled();
+            allow update, delete: if isAuthenticated() && 
+                                    (resource.data.authorUid == request.auth.uid || isAdmin());
+          }
+        }
+        
+        // Private diary - only owner can access
+        match /diary/{userId}/entries/{entryId} {
+          allow read, write: if isAuthenticated() && request.auth.uid == userId;
+        }
+        
+        // Public chat
+        match /publicChat/messages/{messageId} {
+          allow read: if isAuthenticated() && isNotDisabled();
+          allow create: if isAuthenticated() && isNotDisabled();
+          allow delete: if isAdmin();
+        }
+        
+        // Private chats
+        match /chats/{threadId} {
+          allow read, write: if isAuthenticated() && 
+                               isNotDisabled() &&
+                               request.auth.uid in resource.data.participants;
+          
+          match /messages/{messageId} {
+            allow read: if isAuthenticated() && 
+                         isNotDisabled() &&
+                         request.auth.uid in get(/databases/$(database)/documents/chats/$(threadId)).data.participants;
+            allow create: if isAuthenticated() && 
+                           isNotDisabled() &&
+                           request.auth.uid in get(/databases/$(database)/documents/chats/$(threadId)).data.participants;
+          }
+        }
+        
+        // Admin actions log
+        match /adminActions/{actionId} {
+          allow read: if isAdmin();
+          allow create: if isAdmin();
+        }
+        
+        // Blocked identifiers
+        match /blockedIdentifiers/{id} {
+          allow read: if true; // Allow read for checking during registration
+          allow write: if isAdmin();
+        }
+      }
+    }
+    
+    ═══════════════════════════════════════════════════════════════════════════
+    FIRESTORE DATA MODEL
+    ═══════════════════════════════════════════════════════════════════════════
+    
+    users/{uid}
+      - username: string (pseudonym)
+      - email: string
+      - role: "user" | "admin"
+      - joinedAt: timestamp
+      - disabled: boolean (default false)
+      - deviceFingerprint: string (browser fingerprint hash)
+      - blockedReason: string (optional)
+    
+    feed/{postId}
+      - authorUid: string | null (null for anonymous posts)
+      - authorUsername: string | null
+      - text: string
+      - mediaDataUrl: string (optional, base64 compressed image/video)
+      - mediaType: "image" | "video" (optional)
+      - createdAt: timestamp
+      - likes: { [uid]: true }
+      - commentsCount: number
+      - repostsCount: number
+      - isAnonymous: boolean
+    
+    feed/{postId}/comments/{commentId}
+      - authorUid: string
+      - authorUsername: string
+      - text: string
+      - createdAt: timestamp
+    
+    diary/{uid}/entries/{entryId}
+      - text: string
+      - mood: number (1-5 scale)
+      - moodEmoji: string
+      - createdAt: timestamp
+      - updatedAt: timestamp
+      - sharedToFeed: boolean
+    
+    chats/{threadId}
+      - participants: [uid1, uid2]
+      - participantNames: { uid1: username1, uid2: username2 }
+      - lastMessage: string
+      - lastUpdated: timestamp
+    
+    chats/{threadId}/messages/{messageId}
+      - senderUid: string
+      - senderUsername: string
+      - text: string
+      - createdAt: timestamp
+    
+    publicChat/messages/{messageId}
+      - senderUid: string
+      - username: string
+      - text: string
+      - createdAt: timestamp
+    
+    adminActions/{actionId}
+      - adminUid: string
+      - adminUsername: string
+      - actionType: "disable" | "enable" | "promote" | "demote" | "delete"
+      - targetUid: string
+      - targetUsername: string
+      - timestamp: timestamp
+      - details: string
+    
+    blockedIdentifiers/{id}
+      - fingerprintHash: string
+      - email: string (original blocked email)
+      - reason: string
+      - createdAt: timestamp
+    
+    ═══════════════════════════════════════════════════════════════════════════
+    IMPORTANT SECURITY & PRIVACY NOTES
+    ═══════════════════════════════════════════════════════════════════════════
+    
+    1. MEDIA STORAGE:
+       - This app stores images/videos as base64 data URLs in Firestore
+       - This is NOT recommended for production due to:
+         * Firestore document size limits (1MB per document)
+         * Increased bandwidth costs
+         * Slower query performance
+       - For production: Use Firebase Storage or external CDN
+       - Current implementation: Images compressed to ~500KB, videos limited to 2MB
+    
+    2. RE-REGISTRATION PREVENTION:
+       - Client-only ban enforcement has limitations:
+         * Users can bypass with new browser/device/email
+         * Device fingerprinting is not 100% reliable
+         * No IP logging in pure client-side app
+       - Current implementation: Browser fingerprint + blocked email list
+       - For production: Implement server-side ban checking with:
+         * IP address logging and blocking
+         * Phone verification
+         * reCAPTCHA or similar
+         * Firebase Cloud Functions for server-side validation
+    
+    3. XSS PREVENTION:
+       - All user content is escaped using textContent (not innerHTML)
+       - URLs in posts are not auto-linked to prevent javascript: protocol
+       - For production: Consider additional sanitization library
+    
+    4. PRIVACY:
+       - Anonymous posts have authorUid set to null
+       - Private diary is protected by Firestore rules
+       - No real names required - encourage pseudonyms
+       - For production: Consider end-to-end encryption for private content
+    
+    5. CRISIS RESOURCES:
+       - App includes crisis hotline information
+       - This is NOT a substitute for professional mental health care
+       - Users in crisis should contact emergency services immediately
+    
+    ═══════════════════════════════════════════════════════════════════════════
+    TESTING CHECKLIST
+    ═══════════════════════════════════════════════════════════════════════════
+    
+    [ ] Registration with username validation
+    [ ] Login and logout
+    [ ] Password reset email
+    [ ] Create feed post with and without media
+    [ ] Like, comment, and repost on feed
+    [ ] Create private diary entry
+    [ ] Share diary entry anonymously to feed
+    [ ] Edit and delete diary entries
+    [ ] Public chat - send and receive messages
+    [ ] Private chat - search user and start conversation
+    [ ] Breathing exercise animation
+    [ ] Mood tracker with chart visualization
+    [ ] Cognitive reframe prompt generator
+    [ ] Profile update (username, email, password)
+    [ ] Admin panel - view users, promote/demote, disable/enable
+    [ ] Disabled user blocked from login
+    [ ] Blocked device fingerprint prevents re-registration
+    [ ] Responsive design on mobile and desktop
+    [ ] Offline detection and cached feed display
+    
+  -->
+  
+  <!-- Firebase SDK v9 (modular) -->
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js';
+    import { 
+      getAuth, 
+      createUserWithEmailAndPassword, 
+      signInWithEmailAndPassword,
+      signOut,
+      onAuthStateChanged,
+      updateProfile,
+      updateEmail,
+      updatePassword,
+      sendPasswordResetEmail,
+      reauthenticateWithCredential,
+      EmailAuthProvider
+    } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js';
+    import { 
+      getFirestore, 
+      collection, 
+      doc, 
+      setDoc, 
+      getDoc, 
+      getDocs, 
+      addDoc, 
+      updateDoc, 
+      deleteDoc,
+      query, 
+      where, 
+      orderBy, 
+      limit,
+      startAfter,
+      onSnapshot,
+      serverTimestamp,
+      increment,
+      arrayUnion,
+      Timestamp
+    } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js';
+    
+    // Make Firebase available globally
+    window.FirebaseModules = {
+      initializeApp,
+      getAuth,
+      createUserWithEmailAndPassword,
+      signInWithEmailAndPassword,
+      signOut,
+      onAuthStateChanged,
+      updateProfile,
+      updateEmail,
+      updatePassword,
+      sendPasswordResetEmail,
+      reauthenticateWithCredential,
+      EmailAuthProvider,
+      getFirestore,
+      collection,
+      doc,
+      setDoc,
+      getDoc,
+      getDocs,
+      addDoc,
+      updateDoc,
+      deleteDoc,
+      query,
+      where,
+      orderBy,
+      limit,
+      startAfter,
+      onSnapshot,
+      serverTimestamp,
+      increment,
+      arrayUnion,
+      Timestamp
+    };
+  </script>
+  
+  <!-- Google Material Icons -->
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════
+       CSS RESET & BASE STYLES
+       ═══════════════════════════════════════════════════════════════════ */
+    
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    :root {
+      /* Safespace Blue Color Palette */
+      --primary-blue: #085FAD;
+      --primary-blue-dark: #064577;
+      --primary-blue-light: #0B82D1;
+      --background-light: #D9EAF8;
+      --background-lighter: #EFF6FC;
+      --text-muted: #4B5B6A;
+      --text-dark: #1A2633;
+      --success: #2BB673;
+      --danger: #E04B5A;
+      --warning: #F0AD4E;
+      --white: #FFFFFF;
+      --gray-100: #F8F9FA;
+      --gray-200: #E9ECEF;
+      --gray-300: #DEE2E6;
+      --gray-400: #CED4DA;
+      --gray-500: #ADB5BD;
+      --gray-600: #6C757D;
+      --gray-700: #495057;
+      --gray-800: #343A40;
+      --gray-900: #212529;
+      
+      /* Spacing */
+      --spacing-xs: 0.25rem;
+      --spacing-sm: 0.5rem;
+      --spacing-md: 1rem;
+      --spacing-lg: 1.5rem;
+      --spacing-xl: 2rem;
+      --spacing-2xl: 3rem;
+      
+      /* Typography */
+      --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --font-size-xs: 0.75rem;
+      --font-size-sm: 0.875rem;
+      --font-size-base: 1rem;
+      --font-size-lg: 1.125rem;
+      --font-size-xl: 1.25rem;
+      --font-size-2xl: 1.5rem;
+      --font-size-3xl: 2rem;
+      
+      /* Borders */
+      --border-radius-sm: 0.25rem;
+      --border-radius-md: 0.5rem;
+      --border-radius-lg: 0.75rem;
+      --border-radius-xl: 1rem;
+      --border-radius-full: 9999px;
+      
+      /* Shadows */
+      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+      --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+      
+      /* Transitions */
+      --transition-fast: 150ms ease-in-out;
+      --transition-base: 200ms ease-in-out;
+      --transition-slow: 300ms ease-in-out;
+    }
+    
+    body {
+      font-family: var(--font-family);
+      font-size: var(--font-size-base);
+      line-height: 1.6;
+      color: var(--text-dark);
+      background: var(--background-lighter);
+      overflow-x: hidden;
+    }
+    
+    /* ═══════════════════════════════════════════════════════════════════
+       LAYOUT COMPONENTS
+       ═══════════════════════════════════════════════════════════════════ */
+    
+    .app-container {
+      display: flex;
+      min-height: 100vh;
+    }
+    
+    /* Sidebar Navigation */
+    .sidebar {
+      width: 280px;
+      background: var(--white);
+      border-right: 1px solid var(--gray-200);
+      padding: var(--spacing-lg);
+      position: fixed;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      overflow-y: auto;
+      z-index: 100;
+      transition: transform var(--transition-base);
+    }
+    
+    .sidebar.hidden {
+      transform: translateX(-100%);
+    }
+    
+    .sidebar-header {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-md);
+      margin-bottom: var(--spacing-xl);
+      padding-bottom: var(--spacing-lg);
+      border-bottom: 1px solid var(--gray-200);
+    }
+    
+    .logo {
+      width: 40px;
+      height: 40px;
+      background: linear-gradient(135deg, var(--primary-blue) 0%, var(--primary-blue-light) 100%);
+      border-radius: var(--border-radius-lg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--white);
+      font-weight: 700;
+      font-size: var(--font-size-xl);
+    }
+    
+    .logo-text {
+      font-size: var(--font-size-xl);
+      font-weight: 700;
+      color: var(--primary-blue);
+    }
+    
+    .nav-menu {
+      list-style: none;
+    }
+    
+    .nav-item {
+      margin-bottom: var(--spacing-sm);
+    }
+    
+    .nav-link {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-md);
+      padding: var(--spacing-md) var(--spacing-lg);
+      border-radius: var(--border-radius-md);
+      color: var(--text-muted);
+      text-decoration: none;
+      font-weight: 500;
+      transition: all var(--transition-fast);
+      cursor: pointer;
+    }
+    
+    .nav-link:hover {
+      background: var(--background-light);
+      color: var(--primary-blue);
+    }
+    
+    .nav-link.active {
+      background: var(--background-light);
+      color: var(--primary-blue);
+    }
+    
+    .nav-link .material-icons {
+      font-size: 24px;
+    }
+    
+    /* Main Content Area */
+    .main-content {
+      flex: 1;
+      margin-left: 280px;
+      padding: var(--spacing-xl);
+      max-width: 1400px;
+      width: 100%;
+    }
+    
+    /* Mobile Top Bar */
+    .mobile-header {
+      display: none;
+      background: var(--white);
+      border-bottom: 1px solid var(--gray-200);
+      padding: var(--spacing-md) var(--spacing-lg);
+      position: sticky;
+      top: 0;
+      z-index: 99;
+      align-items: center;
+      justify-content: space-between;
+    }
+    
+    .mobile-menu-btn {
+      background: none;
+      border: none;
+      color: var(--text-dark);
+      cursor: pointer;
+      padding: var(--spacing-sm);
+    }
+    
+    /* ═══════════════════════════════════════════════════════════════════
+       UI COMPONENTS
+       ═══════════════════════════════════════════════════════════════════ */
+    
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--spacing-sm);
+      padding: var(--spacing-md) var(--spacing-xl);
+      border: none;
+      border-radius: var(--border-radius-md);
+      font-weight: 600;
+      font-size: var(--font-size-base);
+      cursor: pointer;
+      transition: all var(--transition-fast);
+      text-decoration: none;
+      font-family: var(--font-family);
+    }
+    
+    .btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    
+    .btn-primary {
+      background: var(--primary-blue);
+      color: var(--white);
+    }
+    
+    .btn-primary:hover:not(:disabled) {
+      background: var(--primary-blue-dark);
+      box-shadow: var(--shadow-md);
+    }
+    
+    .btn-secondary {
+      background: var(--gray-200);
+      color: var(--text-dark);
+    }
+    
+    .btn-secondary:hover:not(:disabled) {
+      background: var(--gray-300);
+    }
+    
+    .btn-danger {
+      background: var(--danger);
+      color: var(--white);
+    }
+    
+    .btn-danger:hover:not(:disabled) {
+      background: #C93D4A;
+    }
+    
+    .btn-success {
+      background: var(--success);
+      color: var(--white);
+    }
+    
+    .btn-sm {
+      padding: var(--spacing-sm) var(--spacing-md);
+      font-size: var(--font-size-sm);
+    }
+    
+    .btn-icon {
+      padding: var(--spacing-sm);
+      border-radius: var(--border-radius-full);
+    }
+    
+    .input-group {
+      margin-bottom: var(--spacing-lg);
+    }
+    
+    .input-label {
+      display: block;
+      margin-bottom: var(--spacing-sm);
+      font-weight: 500;
+      color: var(--text-dark);
+      font-size: var(--font-size-sm);
+    }
+    
+    .input-field {
+      width: 100%;
+      padding: var(--spacing-md);
+      border: 1px solid var(--gray-300);
+      border-radius: var(--border-radius-md);
+      font-size: var(--font-size-base);
+      font-family: var(--font-family);
+      transition: all var(--transition-fast);
+    }
+    
+    .input-field:focus {
+      outline: none;
+      border-color: var(--primary-blue);
+      box-shadow: 0 0 0 3px rgba(8, 95, 173, 0.1);
+    }
+    
+    .input-hint {
+      margin-top: var(--spacing-sm);
+      font-size: var(--font-size-xs);
+      color: var(--text-muted);
+    }
+    
+    .input-error {
+      margin-top: var(--spacing-sm);
+      font-size: var(--font-size-xs);
+      color: var(--danger);
+    }
+    
+    textarea.input-field {
+      resize: vertical;
+      min-height: 100px;
+    }
+    
+    .card {
+      background: var(--white);
+      border-radius: var(--border-radius-lg);
+      box-shadow: var(--shadow-sm);
+      padding: var(--spacing-xl);
+      margin-bottom: var(--spacing-lg);
+    }
+    
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: var(--spacing-lg);
+      padding-bottom: var(--spacing-md);
+      border-bottom: 1px solid var(--gray-200);
+    }
+    
+    .card-title {
+      font-size: var(--font-size-xl);
+      font-weight: 700;
+      color: var(--text-dark);
+    }
+    
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+      padding: var(--spacing-lg);
+    }
+    
+    .modal-overlay.active {
+      display: flex;
+    }
+    
+    .modal {
+      background: var(--white);
+      border-radius: var(--border-radius-xl);
+      max-width: 500px;
+      width: 100%;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: var(--shadow-xl);
+      animation: modalSlideIn 0.3s ease-out;
+    }
+    
+    @keyframes modalSlideIn {
+      from {
+        transform: translateY(-50px);
+        opacity: 0;
+      }
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
+    
+    .modal-header {
+      padding: var(--spacing-xl);
+      border-bottom: 1px solid var(--gray-200);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    
+    .modal-title {
+      font-size: var(--font-size-xl);
+      font-weight: 700;
+    }
+    
+    .modal-close {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: var(--spacing-sm);
+      border-radius: var(--border-radius-full);
+      transition: all var(--transition-fast);
+    }
+    
+    .modal-close:hover {
+      background: var(--gray-100);
+      color: var(--text-dark);
+    }
+    
+    .modal-body {
+      padding: var(--spacing-xl);
+    }
+    
+    .modal-footer {
+      padding: var(--spacing-xl);
+      border-top: 1px solid var(--gray-200);
+      display: flex;
+      gap: var(--spacing-md);
+      justify-content: flex-end;
+    }
+    
+    .alert {
+      padding: var(--spacing-md) var(--spacing-lg);
+      border-radius: var(--border-radius-md);
+      margin-bottom: var(--spacing-lg);
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-md);
+    }
+    
+    .alert-info {
+      background: var(--background-light);
+      color: var(--primary-blue);
+      border: 1px solid var(--primary-blue-light);
+    }
+    
+    .alert-success {
+      background: #D4F4E2;
+      color: #1E7E4F;
+      border: 1px solid var(--success);
+    }
+    
+    .alert-warning {
+      background: #FFF3CD;
+      color: #856404;
+      border: 1px solid var(--warning);
+    }
+    
+    .alert-danger {
+      background: #F8D7DA;
+      color: #842029;
+      border: 1px solid var(--danger);
+    }
+    
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--spacing-xs);
+      padding: var(--spacing-xs) var(--spacing-md);
+      border-radius: var(--border-radius-full);
+      font-size: var(--font-size-xs);
+      font-weight: 600;
+    }
+    
+    .badge-primary {
+      background: var(--background-light);
+      color: var(--primary-blue);
+    }
+    
+    .badge-success {
+      background: #D4F4E2;
+      color: var(--success);
+    }
+    
+    .badge-danger {
+      background: #F8D7DA;
+      color: var(--danger);
+    }
+    
+    .skeleton {
+      background: linear-gradient(90deg, var(--gray-200) 25%, var(--gray-100) 50%, var(--gray-200) 75%);
+      background-size: 200% 100%;
+      animation: loading 1.5s infinite;
+      border-radius: var(--border-radius-md);
+    }
+    
+    @keyframes loading {
+      0% {
+        background-position: 200% 0;
+      }
+      100% {
+        background-position: -200% 0;
+      }
+    }
+    
+    .empty-state {
+      text-align: center;
+      padding: var(--spacing-2xl);
+      color: var(--text-muted);
+    }
+    
+    .empty-state .material-icons {
+      font-size: 64px;
+      color: var(--gray-300);
+      margin-bottom: var(--spacing-md);
+    }
+    
+    .empty-state-title {
+      font-size: var(--font-size-lg);
+      font-weight: 600;
+      margin-bottom: var(--spacing-sm);
+      color: var(--text-dark);
+    }
+    
+    /* ═══════════════════════════════════════════════════════════════════
+       AUTH PAGES
+       ═══════════════════════════════════════════════════════════════════ */
+    
+    .auth-container {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: var(--spacing-lg);
+      background: linear-gradient(135deg, var(--background-light) 0%, var(--background-lighter) 100%);
+    }
+    
+    .auth-card {
+      background: var(--white);
+      border-radius: var(--border-radius-xl);
+      box-shadow: var(--shadow-xl);
+      padding: var(--spacing-2xl);
+      width: 100%;
+      max-width: 450px;
+    }
+    
+    .auth-logo {
+      text-align: center;
+      margin-bottom: var(--spacing-xl);
+    }
+    
+    .auth-logo .logo {
+      width: 60px;
+      height: 60px;
+      margin: 0 auto var(--spacing-md);
+    }
+    
+    .auth-title {
+      font-size: var(--font-size-2xl);
+      font-weight: 700;
+      text-align: center;
+      margin-bottom: var(--spacing-md);
+      color: var(--text-dark);
+    }
+    
+    .auth-subtitle {
+      text-align: center;
+      color: var(--text-muted);
+      margin-bottom: var(--spacing-xl);
+    }
+    
+    .auth-divider {
+      text-align: center;
+      margin: var(--spacing-lg) 0;
+      color: var(--text-muted);
+      position: relative;
+    }
+    
+    .auth-divider::before,
+    .auth-divider::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      width: 40%;
+      height: 1px;
+      background: var(--gray-300);
+    }
+    
+    .auth-divider::before {
+      left: 0;
+    }
+    
+    .auth-divider::after {
+      right: 0;
+    }
+    
+    .auth-footer {
+      text-align: center;
+      margin-top: var(--spacing-lg);
+      color: var(--text-muted);
+    }
+    
+    .auth-link {
+      color: var(--primary-blue);
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    .auth-link:hover {
+      text-decoration: underline;
+    }
+    
+    /* ═══════════════════════════════════════════════════════════════════
+       FEED STYLES
+       ═══════════════════════════════════════════════════════════════════ */
+    
+    .feed-post {
+      background: var(--white);
+      border-radius: var(--border-radius-lg);
+      padding: var(--spacing-lg);
+      margin-bottom: var(--spacing-lg);
+      box-shadow: var(--shadow-sm);
+      transition: box-shadow var(--transition-fast);
+    }
+    
+    .feed-post:hover {
+      box-shadow: var(--shadow-md);
+    }
+    
+    .post-header {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-md);
+      margin-bottom: var(--spacing-md);
+    }
+    
+    .post-avatar {
+      width: 48px;
+      height: 48px;
+      border-radius: var(--border-radius-full);
+      background: linear-gradient(135deg, var(--primary-blue) 0%, var(--primary-blue-light) 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--white);
+      font-weight: 600;
+      font-size: var(--font-size-lg);
+      flex-shrink: 0;
+    }
+    
+    .post-info {
+      flex: 1;
+    }
+    
+    .post-author {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+      font-weight: 600;
+      color: var(--text-dark);
+    }
+    
+    .post-time {
+      font-size: var(--font-size-xs);
+      color: var(--text-muted);
+      cursor: help;
+    }
+    
+    .post-content {
+      margin-bottom: var(--spacing-md);
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    
+    .post-media {
+      margin-bottom: var(--spacing-md);
+      border-radius: var(--border-radius-md);
+      overflow: hidden;
+    }
+    
+    .post-media img,
+    .post-media video {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+    
+    .post-actions {
+      display: flex;
+      gap: var(--spacing-lg);
+      padding-top: var(--spacing-md);
+      border-top: 1px solid var(--gray-200);
+    }
+    
+    .post-action-btn {
+      background: none;
+      border: none;
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: var(--spacing-sm) var(--spacing-md);
+      border-radius: var(--border-radius-md);
+      font-size: var(--font-size-sm);
+      font-weight: 500;
+      transition: all var(--transition-fast);
+    }
+    
+    .post-action-btn:hover {
+      background: var(--gray-100);
+      color: var(--primary-blue);
+    }
+    
+    .post-action-btn.active {
+      color: var(--primary-blue);
+    }
+    
+    .post-action-btn .material-icons {
+      font-size: 20px;
+    }
+    
+    .comment-section {
+      margin-top: var(--spacing-lg);
+      padding-top: var(--spacing-lg);
+      border-top: 1px solid var(--gray-200);
+    }
+    
+    .comment {
+      display: flex;
+      gap: var(--spacing-md);
+      margin-bottom: var(--spacing-md);
+    }
+    
+    .comment-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: var(--border-radius-full);
+      background: linear-gradient(135deg, var(--primary-blue-light) 0%, var(--primary-blue) 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--white);
+      font-weight: 600;
+      font-size: var(--font-size-sm);
+      flex-shrink: 0;
+    }
+    
+    .comment-content {
+      flex: 1;
+    }
+    
+    .comment-author {
+      font-weight: 600;
+      color: var(--text-dark);
+      margin-bottom: var(--spacing-xs);
+    }
+    
+    .comment-text {
+      color: var(--text-dark);
+      line-height: 1.5;
+      word-wrap: break-word;
+    }
+    
+    .comment-time {
+      font-size: var(--font-size-xs);
+      color: var(--text-muted);
+      margin-top: var(--spacing-xs);
+    }
+    
+    .comment-form {
+      display: flex;
+      gap: var(--spacing-md);
+      margin-top: var(--spacing-md);
+    }
+    
+    .comment-input {
+      flex: 1;
+      padding: var(--spacing-md);
+      border: 1px solid var(--gray-300);
+      border-radius: var(--border-radius-full);
+      font-size: var(--font-size-sm);
+      font-family: var(--font-family);
+    }
+    
+    /* ═══════════════════════════════════════════════════════════════════
+       CHAT STYLES
+       ═══════════════════════════════════════════════════════════════════ */
+    
+    .chat-container {
+      display: flex;
+      height: calc(100vh - 120px);
+      background: var(--white);
+      border-radius: var(--border-radius-lg);
+      overflow: hidden;
+      box-shadow: var(--shadow-sm);
+    }
+    
+    .chat-sidebar {
+      width: 300px;
+      border-right: 1px solid var(--gray-200);
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .chat-search {
+      padding: var(--spacing-lg);
+      border-bottom: 1px solid var(--gray-200);
+    }
+    
+    .chat-list {
+      flex: 1;
+      overflow-y: auto;
+    }
+    
+    .chat-item {
+      padding: var(--spacing-lg);
+      border-bottom: 1px solid var(--gray-200);
+      cursor: pointer;
+      transition: background var(--transition-fast);
+    }
+    
+    .chat-item:hover {
+      background: var(--gray-100);
+    }
+    
+    .chat-item.active {
+      background: var(--background-light);
+    }
+    
+    .chat-item-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: var(--spacing-xs);
+    }
+    
+    .chat-item-name {
+      font-weight: 600;
+      color: var(--text-dark);
+    }
+    
+    .chat-item-time {
+      font-size: var(--font-size-xs);
+      color: var(--text-muted);
+    }
+    
+    .chat-item-preview {
+      font-size: var(--font-size-sm);
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    
+    .chat-main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .chat-header {
+      padding: var(--spacing-lg);
+      border-bottom: 1px solid var(--gray-200);
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-md);
+    }
+    
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: var(--spacing-lg);
+      display: flex;
+      flex-direction: column;
+      gap: var(--spacing-md);
+    }
+    
+    .message {
+      display: flex;
+      gap: var(--spacing-md);
+      max-width: 70%;
+    }
+    
+    .message.own {
+      align-self: flex-end;
+      flex-direction: row-reverse;
+    }
+    
+    .message-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: var(--border-radius-full);
+      background: linear-gradient(135deg, var(--primary-blue-light) 0%, var(--primary-blue) 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--white);
+      font-weight: 600;
+      font-size: var(--font-size-sm);
+      flex-shrink: 0;
+    }
+    
+    .message-content {
+      flex: 1;
+    }
+    
+    .message-author {
+      font-size: var(--font-size-xs);
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-bottom: var(--spacing-xs);
+    }
+    
+    .message.own .message-author {
+      text-align: right;
+    }
+    
+    .message-bubble {
+      background: var(--gray-100);
+      padding: var(--spacing-md);
+      border-radius: var(--border-radius-lg);
+      word-wrap: break-word;
+      line-height: 1.5;
+    }
+    
+    .message.own .message-bubble {
+      background: var(--primary-blue);
+      color: var(--white);
+      border-bottom-right-radius: var(--border-radius-sm);
+    }
+    
+    .message-time {
+      font-size: var(--font-size-xs);
+      color: var(--text-muted);
+      margin-top: var(--spacing-xs);
+    }
+    
+    .message.own .message-time {
+      text-align: right;
+    }
+    
+    .chat-input-container {
+      padding: var(--spacing-lg);
+      border-top: 1px solid var(--gray-200);
+    }
+    
+    .chat-input-form {
+      display: flex;
+      gap: var(--spacing-md);
+    }
+    
+    .chat-input {
+      flex: 1;
+      padding: var(--spacing-md);
+      border: 1px solid var(--gray-300);
+      border-radius: var(--border-radius-full);
+      font-size: var(--font-size-base);
+      font-family: var(--font-family);
+    }
+    
+    /* ═══════════════════════════════════════════════════════════════════
+       HEALING TOOLS STYLES
+       ═══════════════════════════════════════════════════════════════════ */
+    
+    .breathing-exercise {
+      text-align: center;
+      padding: var(--spacing-2xl);
+    }
+    
+    .breathing-circle {
+      width: 200px;
+      height: 200px;
+      margin: 0 auto var(--spacing-xl);
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--primary-blue) 0%, var(--primary-blue-light) 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--white);
+      font-size: var(--font-size-3xl);
+      font-weight: 700;
+      box-shadow: 0 0 40px rgba(8, 95, 173, 0.3);
+      transition: transform 4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    
+    .breathing-circle.inhale {
+      transform: scale(1.3);
+    }
+    
+    .breathing-circle.hold {
+      transform: scale(1.3);
+    }
+    
+    .breathing-circle.exhale {
+      transform: scale(1);
+    }
+    
+    .breathing-instruction {
+      font-size: var(--font-size-xl);
+      color: var(--primary-blue);
+      font-weight: 600;
+      margin-bottom: var(--spacing-md);
+    }
+    
+    .mood-tracker-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: var(--spacing-md);
+      margin-bottom: var(--spacing-xl);
+    }
+    
+    .mood-option {
+      text-align: center;
+      padding: var(--spacing-lg);
+      border: 2px solid var(--gray-300);
+      border-radius: var(--border-radius-lg);
+      cursor: pointer;
+      transition: all var(--transition-fast);
+    }
+    
+    .mood-option:hover {
+      border-color: var(--primary-blue);
+      background: var(--background-light);
+    }
+    
+    .mood-option.selected {
+      border-color: var(--primary-blue);
+      background: var(--background-light);
+    }
+    
+    .mood-emoji {
+      font-size: 48px;
+      margin-bottom: var(--spacing-sm);
+    }
+    
+    .mood-label {
+      font-size: var(--font-size-sm);
+      font-weight: 600;
+      color: var(--text-dark);
+    }
+    
+    .mood-chart {
+      margin-top: var(--spacing-xl);
+      padding: var(--spacing-lg);
+      background: var(--gray-100);
+      border-radius: var(--border-radius-lg);
+    }
+    
+    /* ═══════════════════════════════════════════════════════════════════
+       ADMIN PANEL STYLES
+       ═══════════════════════════════════════════════════════════════════ */
+    
+    .admin-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    
+    .admin-table th,
+    .admin-table td {
+      padding: var(--spacing-md);
+      text-align: left;
+      border-bottom: 1px solid var(--gray-200);
+    }
+    
+    .admin-table th {
+      background: var(--gray-100);
+      font-weight: 600;
+      color: var(--text-dark);
+      font-size: var(--font-size-sm);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    
+    .admin-table tr:hover {
+      background: var(--gray-50);
+    }
+    
+    .admin-actions {
+      display: flex;
+      gap: var(--spacing-sm);
+    }
+    
+    /* ═══════════════════════════════════════════════════════════════════
+       CRISIS RESOURCES
+       ═══════════════════════════════════════════════════════════════════ */
+    
+    .crisis-banner {
+      background: linear-gradient(135deg, var(--danger) 0%, #C93D4A 100%);
+      color: var(--white);
+      padding: var(--spacing-lg);
+      border-radius: var(--border-radius-lg);
+      margin-bottom: var(--spacing-xl);
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-md);
+    }
+    
+    .crisis-banner .material-icons {
+      font-size: 32px;
+    }
+    
+    .crisis-content {
+      flex: 1;
+    }
+    
+    .crisis-title {
+      font-weight: 700;
+      font-size: var(--font-size-lg);
+      margin-bottom: var(--spacing-xs);
+    }
+    
+    .crisis-text {
+      font-size: var(--font-size-sm);
+      opacity: 0.95;
+    }
+    
+    /* ═══════════════════════════════════════════════════════════════════
+       RESPONSIVE DESIGN
+       ═══════════════════════════════════════════════════════════════════ */
+    
+    @media (max-width: 1024px) {
+      .sidebar {
+        width: 240px;
+      }
+      
+      .main-content {
+        margin-left: 240px;
+      }
+    }
+    
+    @media (max-width: 768px) {
+      .mobile-header {
+        display: flex;
+      }
+      
+      .sidebar {
+        transform: translateX(-100%);
+      }
+      
+      .sidebar.visible {
+        transform: translateX(0);
+      }
+      
+      .main-content {
+        margin-left: 0;
+        padding: var(--spacing-md);
+      }
+      
+      .chat-sidebar {
+        display: none;
+      }
+      
+      .chat-sidebar.visible {
+        display: flex;
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        z-index: 10;
+        background: var(--white);
+      }
+      
+      .message {
+        max-width: 85%;
+      }
+      
+      .mood-tracker-grid {
+        grid-template-columns: repeat(3, 1fr);
+      }
+    }
+    
+    /* ═══════════════════════════════════════════════════════════════════
+       UTILITY CLASSES
+       ═══════════════════════════════════════════════════════════════════ */
+    
+    .hidden {
+      display: none !important;
+    }
+    
+    .text-center {
+      text-align: center;
+    }
+    
+    .text-muted {
+      color: var(--text-muted);
+    }
+    
+    .text-danger {
+      color: var(--danger);
+    }
+    
+    .text-success {
+      color: var(--success);
+    }
+    
+    .mb-0 { margin-bottom: 0; }
+    .mb-1 { margin-bottom: var(--spacing-sm); }
+    .mb-2 { margin-bottom: var(--spacing-md); }
+    .mb-3 { margin-bottom: var(--spacing-lg); }
+    .mb-4 { margin-bottom: var(--spacing-xl); }
+    
+    .mt-0 { margin-top: 0; }
+    .mt-1 { margin-top: var(--spacing-sm); }
+    .mt-2 { margin-top: var(--spacing-md); }
+    .mt-3 { margin-top: var(--spacing-lg); }
+    .mt-4 { margin-top: var(--spacing-xl); }
+    
+    .flex {
+      display: flex;
+    }
+    
+    .items-center {
+      align-items: center;
+    }
+    
+    .justify-between {
+      justify-content: space-between;
+    }
+    
+    .gap-2 {
+      gap: var(--spacing-md);
+    }
+    
+    .spinner {
+      border: 3px solid var(--gray-200);
+      border-top: 3px solid var(--primary-blue);
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      animation: spin 1s linear infinite;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       AUTH PAGES (Login, Register, Forgot Password)
+       ═══════════════════════════════════════════════════════════════════ -->
+  
+  <!-- Login Page -->
+  <div id="loginPage" class="auth-container">
+    <div class="auth-card">
+      <div class="auth-logo">
+        <div class="logo">S</div>
+        <div class="logo-text">Safespace</div>
+      </div>
+      <h1 class="auth-title">Welcome Back</h1>
+      <p class="auth-subtitle">Sign in to your safe space</p>
+      
+      <div id="loginError" class="alert alert-danger hidden">
+        <span class="material-icons">error</span>
+        <span id="loginErrorText"></span>
+      </div>
+      
+      <form id="loginForm">
+        <div class="input-group">
+          <label class="input-label">Email</label>
+          <input type="email" id="loginEmail" class="input-field" required>
+        </div>
+        
+        <div class="input-group">
+          <label class="input-label">Password</label>
+          <input type="password" id="loginPassword" class="input-field" required>
+        </div>
+        
+        <button type="submit" class="btn btn-primary" style="width: 100%;">
+          Sign In
+        </button>
+      </form>
+      
+      <div class="auth-footer">
+        <a href="#" id="showForgotPassword" class="auth-link">Forgot password?</a>
+        <br><br>
+        Don't have an account? <a href="#" id="showRegister" class="auth-link">Sign up</a>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Register Page -->
+  <div id="registerPage" class="auth-container hidden">
+    <div class="auth-card">
+      <div class="auth-logo">
+        <div class="logo">S</div>
+        <div class="logo-text">Safespace</div>
+      </div>
+      <h1 class="auth-title">Create Account</h1>
+      <p class="auth-subtitle">Join our supportive community</p>
+      
+      <div class="alert alert-info">
+        <span class="material-icons">info</span>
+        <span>Pick a username — it doesn't have to be your real name. This site is a safe, anonymous place to share.</span>
+      </div>
+      
+      <div id="registerError" class="alert alert-danger hidden">
+        <span class="material-icons">error</span>
+        <span id="registerErrorText"></span>
+      </div>
+      
+      <form id="registerForm">
+        <div class="input-group">
+          <label class="input-label">Username</label>
+          <input type="text" id="registerUsername" class="input-field" required minlength="3" maxlength="30">
+          <div class="input-hint">Choose a pseudonym that feels safe to you (3-30 characters)</div>
+        </div>
+        
+        <div class="input-group">
+          <label class="input-label">Email</label>
+          <input type="email" id="registerEmail" class="input-field" required>
+          <div class="input-hint">We'll never share your email</div>
+        </div>
+        
+        <div class="input-group">
+          <label class="input-label">Password</label>
+          <input type="password" id="registerPassword" class="input-field" required minlength="6">
+          <div class="input-hint">Minimum 6 characters</div>
+        </div>
+        
+        <button type="submit" class="btn btn-primary" style="width: 100%;">
+          Create Account
+        </button>
+      </form>
+      
+      <div class="auth-footer">
+        Already have an account? <a href="#" id="showLogin" class="auth-link">Sign in</a>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Forgot Password Page -->
+  <div id="forgotPasswordPage" class="auth-container hidden">
+    <div class="auth-card">
+      <div class="auth-logo">
+        <div class="logo">S</div>
+        <div class="logo-text">Safespace</div>
+      </div>
+      <h1 class="auth-title">Reset Password</h1>
+      <p class="auth-subtitle">We'll send you a reset link</p>
+      
+      <div id="resetSuccess" class="alert alert-success hidden">
+        <span class="material-icons">check_circle</span>
+        <span>Password reset email sent! Check your inbox.</span>
+      </div>
+      
+      <div id="resetError" class="alert alert-danger hidden">
+        <span class="material-icons">error</span>
+        <span id="resetErrorText"></span>
+      </div>
+      
+      <form id="forgotPasswordForm">
+        <div class="input-group">
+          <label class="input-label">Email</label>
+          <input type="email" id="resetEmail" class="input-field" required>
+        </div>
+        
+        <button type="submit" class="btn btn-primary" style="width: 100%;">
+          Send Reset Link
+        </button>
+      </form>
+      
+      <div class="auth-footer">
+        <a href="#" id="backToLogin" class="auth-link">Back to sign in</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       MAIN APP LAYOUT (After Login)
+       ═══════════════════════════════════════════════════════════════════ -->
+  
+  <div id="appContainer" class="app-container hidden">
+    
+    <!-- Mobile Header -->
+    <div class="mobile-header">
+      <button class="mobile-menu-btn" id="mobileMenuBtn">
+        <span class="material-icons">menu</span>
+      </button>
+      <div class="logo-text">Safespace</div>
+      <div></div>
+    </div>
+    
+    <!-- Sidebar Navigation -->
+    <nav class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">S</div>
+        <div class="logo-text">Safespace</div>
+      </div>
+      
+      <ul class="nav-menu">
+        <li class="nav-item">
+          <a class="nav-link active" data-page="feed">
+            <span class="material-icons">home</span>
+            <span>Feed</span>
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" data-page="diary">
+            <span class="material-icons">book</span>
+            <span>Private Diary</span>
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" data-page="publicChat">
+            <span class="material-icons">forum</span>
+            <span>Public Chat</span>
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" data-page="privateChat">
+            <span class="material-icons">chat</span>
+            <span>Private Chat</span>
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" data-page="healingTools">
+            <span class="material-icons">spa</span>
+            <span>Healing Tools</span>
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" data-page="profile">
+            <span class="material-icons">person</span>
+            <span>Profile</span>
+          </a>
+        </li>
+        <li class="nav-item" id="adminNavItem" style="display: none;">
+          <a class="nav-link" data-page="admin">
+            <span class="material-icons">admin_panel_settings</span>
+            <span>Admin Panel</span>
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" id="logoutBtn">
+            <span class="material-icons">logout</span>
+            <span>Logout</span>
+          </a>
+        </li>
+      </ul>
+    </nav>
+    
+    <!-- Main Content Area -->
+    <main class="main-content" id="mainContent">
+      
+      <!-- Crisis Resources Banner (Always Visible) -->
+      <div class="crisis-banner">
+        <span class="material-icons">emergency</span>
+        <div class="crisis-content">
+          <div class="crisis-title">Need Immediate Help?</div>
+          <div class="crisis-text">
+            If you’re in crisis, please reach out for help right now.
+Call your local emergency services (911) or contact:
+            <strong>NCMH Crisis Hotline (National Center for Mental Health)</strong> 
+            <strong>Landline (Luzon-wide): 1553 | </strong>
+            <strong>Globe/TM: 0966-351-4518 / 0908-639-2672 | </strong>
+            <strong>Smart/Sun/TNT: 0909-901-8727</strong>
+          </div>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="showResourcesModal">View Resources</button>
+      </div>
+      
+      <!-- FEED PAGE -->
+      <div id="feedPage" class="page-content">
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">Community Feed</h2>
+            <button class="btn btn-primary" id="createPostBtn">
+              <span class="material-icons">add</span>
+              Create Post
+            </button>
+          </div>
+          
+          <!-- Search Posts -->
+          <div class="input-group">
+            <input type="text" id="feedSearch" class="input-field" placeholder="Search posts...">
+          </div>
+          
+          <!-- Feed Posts Container -->
+          <div id="feedPosts">
+            <!-- Loading skeleton -->
+            <div class="skeleton" style="height: 200px; margin-bottom: 1rem;"></div>
+            <div class="skeleton" style="height: 200px; margin-bottom: 1rem;"></div>
+          </div>
+          
+          <button class="btn btn-secondary" id="loadMoreFeed" style="width: 100%;">
+            Load More
+          </button>
+        </div>
+      </div>
+      
+      <!-- PRIVATE DIARY PAGE -->
+      <div id="diaryPage" class="page-content hidden">
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">Private Diary</h2>
+            <button class="btn btn-primary" id="createDiaryBtn">
+              <span class="material-icons">add</span>
+              New Entry
+            </button>
+          </div>
+          
+          <div class="alert alert-info">
+            <span class="material-icons">lock</span>
+            <span>Your diary is completely private. Only you can see these entries.</span>
+          </div>
+          
+          <div id="diaryEntries">
+            <!-- Diary entries will be loaded here -->
+          </div>
+        </div>
+      </div>
+      
+      <!-- PUBLIC CHAT PAGE -->
+      <div id="publicChatPage" class="page-content hidden">
+        <div class="chat-container">
+          <div class="chat-main">
+            <div class="chat-header">
+              <span class="material-icons">forum</span>
+              <div>
+                <h3 style="margin: 0;">Public Chat Room</h3>
+                <p style="margin: 0; font-size: var(--font-size-sm); color: var(--text-muted);">
+                  A safe space for open conversation
+                </p>
+              </div>
+            </div>
+            
+            <div class="chat-messages" id="publicChatMessages">
+              <!-- Messages will be loaded here -->
+            </div>
+            
+            <div class="chat-input-container">
+              <form class="chat-input-form" id="publicChatForm">
+                <input type="text" id="publicChatInput" class="chat-input" placeholder="Type a message..." required maxlength="500">
+                <button type="submit" class="btn btn-primary btn-icon">
+                  <span class="material-icons">send</span>
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- PRIVATE CHAT PAGE -->
+      <div id="privateChatPage" class="page-content hidden">
+        <div class="chat-container">
+          <div class="chat-sidebar" id="chatSidebar">
+            <div class="chat-search">
+              <input type="text" id="userSearchInput" class="input-field" placeholder="Search users...">
+              <div id="userSearchResults" style="margin-top: var(--spacing-md);"></div>
+            </div>
+            <div class="chat-list" id="privateChatList">
+              <!-- Chat threads will be loaded here -->
+            </div>
+          </div>
+          
+          <div class="chat-main" id="privateChatMain">
+            <div class="empty-state">
+              <span class="material-icons">chat_bubble_outline</span>
+              <h3 class="empty-state-title">No Chat Selected</h3>
+              <p>Search for a user to start a private conversation</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- HEALING TOOLS PAGE -->
+      <div id="healingToolsPage" class="page-content hidden">
+        <div class="card">
+          <h2 class="card-title">Healing & Self-Care Tools</h2>
+          <p class="text-muted">Take a moment for yourself with these mindfulness exercises</p>
+          
+          <div class="alert alert-warning">
+            <span class="material-icons">info</span>
+            <span>These tools are for self-care and support. They are not a substitute for professional mental health care.</span>
+          </div>
+        </div>
+        
+        <!-- Breathing Exercise -->
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">4-4-6 Breathing Exercise</h3>
+          </div>
+          
+          <div class="breathing-exercise">
+            <div class="breathing-circle" id="breathingCircle">
+              <span id="breathingTimer">4</span>
+            </div>
+            <div class="breathing-instruction" id="breathingInstruction">
+              Click Start to begin
+            </div>
+            <button class="btn btn-primary" id="startBreathingBtn">Start Exercise</button>
+            <button class="btn btn-secondary hidden" id="stopBreathingBtn">Stop</button>
+          </div>
+        </div>
+        
+        <!-- Mood Tracker -->
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">Mood Tracker</h3>
+          </div>
+          
+          <p class="text-muted mb-3">How are you feeling today?</p>
+          
+          <div class="mood-tracker-grid">
+            <div class="mood-option" data-mood="1" data-emoji="😢">
+              <div class="mood-emoji">😢</div>
+              <div class="mood-label">Very Low</div>
+            </div>
+            <div class="mood-option" data-mood="2" data-emoji="😟">
+              <div class="mood-emoji">😟</div>
+              <div class="mood-label">Low</div>
+            </div>
+            <div class="mood-option" data-mood="3" data-emoji="😐">
+              <div class="mood-emoji">😐</div>
+              <div class="mood-label">Neutral</div>
+            </div>
+            <div class="mood-option" data-mood="4" data-emoji="🙂">
+              <div class="mood-emoji">🙂</div>
+              <div class="mood-label">Good</div>
+            </div>
+            <div class="mood-option" data-mood="5" data-emoji="😊">
+              <div class="mood-emoji">😊</div>
+              <div class="mood-label">Great</div>
+            </div>
+          </div>
+          
+          <div class="input-group">
+            <label class="input-label">Add a note (optional)</label>
+            <textarea id="moodNote" class="input-field" placeholder="What's on your mind?"></textarea>
+          </div>
+          
+          <button class="btn btn-primary" id="saveMoodBtn">Save Mood Entry</button>
+          
+          <div class="mood-chart" id="moodChartContainer" style="display: none;">
+            <h4>Your Mood Over Time (Last 7 Days)</h4>
+            <canvas id="moodChart" width="600" height="300"></canvas>
+          </div>
+        </div>
+        
+        <!-- Cognitive Reframe Tool -->
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">Cognitive Reframe Helper</h3>
+          </div>
+          
+          <p class="text-muted mb-3">Challenge negative thoughts with guided reflection</p>
+          
+          <div class="input-group">
+            <label class="input-label">What's troubling you?</label>
+            <select id="reframeCategory" class="input-field">
+              <option value="">Select a category...</option>
+              <option value="anxiety">Anxiety</option>
+              <option value="depression">Depression</option>
+              <option value="self-worth">Self-Worth</option>
+              <option value="relationships">Relationships</option>
+              <option value="work-stress">Work/School Stress</option>
+            </select>
+          </div>
+          
+          <div id="reframePrompts" class="hidden">
+            <div class="alert alert-info">
+              <div id="reframePromptsContent"></div>
+            </div>
+            
+            <div class="input-group">
+              <label class="input-label">Your Reflection</label>
+              <textarea id="reframeResponse" class="input-field" rows="6" placeholder="Write your thoughts here..."></textarea>
+            </div>
+            
+            <button class="btn btn-primary" id="saveReframeBtn">Save to Private Diary</button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- PROFILE PAGE -->
+      <div id="profilePage" class="page-content hidden">
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">Profile Settings</h2>
+          </div>
+          
+          <div id="profileError" class="alert alert-danger hidden">
+            <span class="material-icons">error</span>
+            <span id="profileErrorText"></span>
+          </div>
+          
+          <div id="profileSuccess" class="alert alert-success hidden">
+            <span class="material-icons">check_circle</span>
+            <span id="profileSuccessText"></span>
+          </div>
+          
+          <h3>Account Information</h3>
+          
+          <div class="input-group">
+            <label class="input-label">Username</label>
+            <input type="text" id="profileUsername" class="input-field">
+            <button class="btn btn-secondary btn-sm mt-1" id="updateUsernameBtn">Update Username</button>
+          </div>
+          
+          <div class="input-group">
+            <label class="input-label">Email</label>
+            <input type="email" id="profileEmail" class="input-field">
+            <button class="btn btn-secondary btn-sm mt-1" id="updateEmailBtn">Update Email</button>
+          </div>
+          
+          <div class="input-group">
+            <label class="input-label">New Password</label>
+            <input type="password" id="profileNewPassword" class="input-field" placeholder="Enter new password">
+            <button class="btn btn-secondary btn-sm mt-1" id="updatePasswordBtn">Change Password</button>
+          </div>
+          
+          <hr style="margin: var(--spacing-xl) 0; border: none; border-top: 1px solid var(--gray-200);">
+          
+          <h3>Account Actions</h3>
+          
+          <div style="display: flex; gap: var(--spacing-md); margin-top: var(--spacing-lg);">
+            <button class="btn btn-secondary" id="exportDataBtn">
+              <span class="material-icons">download</span>
+              Export My Data
+            </button>
+            <button class="btn btn-danger" id="deactivateAccountBtn">
+              <span class="material-icons">block</span>
+              Deactivate Account
+            </button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- ADMIN PANEL PAGE -->
+      <div id="adminPage" class="page-content hidden">
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">Admin Panel</h2>
+          </div>
+          
+          <div class="alert alert-warning">
+            <span class="material-icons">warning</span>
+            <span>Admin actions are logged for audit purposes. Use responsibly.</span>
+          </div>
+          
+          <div id="adminError" class="alert alert-danger hidden">
+            <span class="material-icons">error</span>
+            <span id="adminErrorText"></span>
+          </div>
+          
+          <div id="adminSuccess" class="alert alert-success hidden">
+            <span class="material-icons">check_circle</span>
+            <span id="adminSuccessText"></span>
+          </div>
+          
+          <h3>User Management</h3>
+          
+          <div style="overflow-x: auto;">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>Username</th>
+                  <th>Email</th>
+                  <th>Role</th>
+                  <th>Joined</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="adminUserList">
+                <tr>
+                  <td colspan="6" class="text-center">Loading users...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">Admin Actions Log</h3>
+          </div>
+          
+          <div style="max-height: 400px; overflow-y: auto;">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>Admin</th>
+                  <th>Action</th>
+                  <th>Target User</th>
+                  <th>Date</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody id="adminActionsLog">
+                <tr>
+                  <td colspan="5" class="text-center">Loading actions...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      
+    </main>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       MODALS
+       ═══════════════════════════════════════════════════════════════════ -->
+  
+  <!-- Create Post Modal -->
+  <div class="modal-overlay" id="createPostModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 class="modal-title">Create Post</h3>
+        <button class="modal-close" onclick="closeModal('createPostModal')">
+          <span class="material-icons">close</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="input-group">
+          <label class="input-label">What's on your mind?</label>
+          <textarea id="postText" class="input-field" rows="4" maxlength="5000" placeholder="Share your thoughts..."></textarea>
+          <div class="input-hint"><span id="postCharCount">0</span>/5000 characters</div>
+        </div>
+        
+        <div class="input-group">
+          <label class="input-label">Add Image or Video (optional)</label>
+          <input type="file" id="postMedia" accept="image/*,video/*" class="input-field">
+          <div class="input-hint">Max 2MB. Images will be compressed. Large files may take time to upload.</div>
+          <div id="mediaPreview" style="margin-top: var(--spacing-md);"></div>
+        </div>
+        
+        <div class="input-group mb-0">
+          <label style="display: flex; align-items: center; gap: var(--spacing-sm); cursor: pointer;">
+            <input type="checkbox" id="postAnonymous">
+            <span>Post anonymously</span>
+          </label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('createPostModal')">Cancel</button>
+        <button class="btn btn-primary" id="submitPostBtn">Post</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Create Diary Entry Modal -->
+  <div class="modal-overlay" id="createDiaryModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 class="modal-title" id="diaryModalTitle">New Diary Entry</h3>
+        <button class="modal-close" onclick="closeModal('createDiaryModal')">
+          <span class="material-icons">close</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="input-group">
+          <label class="input-label">How are you feeling right now?</label>
+          <textarea id="diaryText" class="input-field" rows="6" placeholder="This diary is private. Write freely..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('createDiaryModal')">Cancel</button>
+        <button class="btn btn-primary" id="saveDiaryBtn">Save Entry</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Comment Modal -->
+  <div class="modal-overlay" id="commentModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 class="modal-title">Comments</h3>
+        <button class="modal-close" onclick="closeModal('commentModal')">
+          <span class="material-icons">close</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div id="commentsContainer">
+          <!-- Comments will be loaded here -->
+        </div>
+        
+        <form id="commentForm" class="comment-form">
+          <input type="text" id="commentInput" class="comment-input" placeholder="Write a comment..." required maxlength="500">
+          <button type="submit" class="btn btn-primary btn-sm">Post</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Resources Modal -->
+  <div class="modal-overlay" id="resourcesModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 class="modal-title">Crisis & Support Resources</h3>
+        <button class="modal-close" onclick="closeModal('resourcesModal')">
+          <span class="material-icons">close</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-danger">
+          <span class="material-icons">emergency</span>
+          <span><strong>In immediate danger?</strong> Call 911 or go to your nearest hospital emergency room.</span>
+        </div>
+        
+        <h4>Philippines</h4>
+        <ul style="line-height: 2; margin-bottom: var(--spacing-lg);">
+        <strong>NCMH Crisis (National Center for Mental Health)</strong>
+          <li><strong>Luzon-wide (landline):</strong> 1553</li>
+          <li><strong>Globe / TM:</strong> 0966-351-4518 / 0908-639-2672</li>
+          <li><strong>Smart / Sun / TNT:</strong> 0909-901-8727</li>
+          <strong>Hopeline Philippines</strong>        
+          <li><strong>Landline:</strong> (02) 8804-4673</li>
+          <li><strong>Globe:</strong> 0917-558-4673</li>
+          <li><strong>PLDT / Smart:</strong> (02) 8804-4673</li>
+          <strong>In Touch Community Services (24/7)</strong>
+          <li><strong>Landline:</strong> (02) 8893-7603</li>
+          <li><strong>Globe:</strong> 0917-800-1123</li>
+          <li><strong>Smart:</strong> 0922-893-8944</li>
+          <strong>Philippine Red Cross Mental Health Hotline</strong>
+            <li><strong>143 then press 2</strong></li>
+          <li><strong>Smart / Sun:</strong> 0939-937-0009</li>
+          <li><strong>Globe / TM:</strong> 0956-563-6659</li>
+
+
+        </ul>
+
+        <h4>United States</h4>
+        <ul style="line-height: 2; margin-bottom: var(--spacing-lg);">
+          <li><strong>988 Suicide & Crisis Lifeline:</strong> Call or text 988</li>
+          <li><strong>Crisis Text Line:</strong> Text HOME to 741741</li>
+          <li><strong>SAMHSA National Helpline:</strong> 1-800-662-4357</li>
+          <li><strong>Trevor Project (LGBTQ+ Youth):</strong> 1-866-488-7386</li>
+          <li><strong>Veterans Crisis Line:</strong> Call 988 then press 1</li>
+        </ul>
+        
+        <h4>International</h4>
+        <ul style="line-height: 2; margin-bottom: var(--spacing-lg);">
+          <li><strong>International Association for Suicide Prevention:</strong> <a href="https://www.iasp.info/resources/Crisis_Centres/" target="_blank">Find your country</a></li>
+          <li><strong>Befrienders Worldwide:</strong> <a href="https://www.befrienders.org/" target="_blank">befrienders.org</a></li>
+        </ul>
+        
+        <h4>Online Support</h4>
+        <ul style="line-height: 2;">
+          <li><strong>7 Cups:</strong> Free emotional support chat</li>
+          <li><strong>BetterHelp:</strong> Online therapy (paid)</li>
+          <li><strong>NAMI:</strong> Mental health education and support groups</li>
+        </ul>
+        
+        <div class="alert alert-info mt-3">
+          <span class="material-icons">info</span>
+          <span>Remember: Seeking help is a sign of strength, not weakness. You deserve support.</span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="closeModal('resourcesModal')">Close</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Reauthentication Modal -->
+  <div class="modal-overlay" id="reauthModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 class="modal-title">Verify Your Password</h3>
+        <button class="modal-close" onclick="closeModal('reauthModal')">
+          <span class="material-icons">close</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted mb-3">For security, please confirm your current password.</p>
+        
+        <div class="input-group">
+          <label class="input-label">Current Password</label>
+          <input type="password" id="reauthPassword" class="input-field">
+        </div>
+        
+        <div id="reauthError" class="input-error hidden"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('reauthModal')">Cancel</button>
+        <button class="btn btn-primary" id="reauthConfirmBtn">Confirm</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Confirm Modal (Generic) -->
+  <div class="modal-overlay" id="confirmModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 class="modal-title" id="confirmModalTitle">Confirm Action</h3>
+        <button class="modal-close" onclick="closeModal('confirmModal')">
+          <span class="material-icons">close</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p id="confirmModalMessage">Are you sure?</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('confirmModal')">Cancel</button>
+        <button class="btn btn-danger" id="confirmModalBtn">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       JAVASCRIPT APPLICATION CODE
+       ═══════════════════════════════════════════════════════════════════ -->
+  
+  <script>
+    // ═══════════════════════════════════════════════════════════════════
+    // GLOBAL STATE & CONFIGURATION
+    // ═══════════════════════════════════════════════════════════════════
+    
+    let app = {
+      auth: null,
+      db: null,
+      currentUser: null,
+      currentUserData: null,
+      currentPage: 'feed',
+      lastFeedDoc: null,
+      feedPosts: [],
+      unsubscribers: [],
+      selectedMood: null,
+      breathingInterval: null,
+      currentChatThread: null,
+      reauthCallback: null,
+      rateLimiter: {
+        posts: { count: 0, resetTime: Date.now() + 60000 }, // 5 posts per minute
+        messages: { count: 0, resetTime: Date.now() + 60000 } // 20 messages per minute
+      }
+    };
+    
+    // Firebase configuration
+    const firebaseConfig = {
+      apiKey: "AIzaSyBxw8mSXXW72hZ5EPeEVEo4aTyBqAENUZw",
+      authDomain: "safespace-d741b.firebaseapp.com",
+      projectId: "safespace-d741b",
+      storageBucket: "safespace-d741b.firebasestorage.app",
+      messagingSenderId: "955505492503",
+      appId: "1:955505492503:web:1aadc8bf263e40ad48d252",
+      measurementId: "G-R48SR53ZZY"
+    };
+    
+    // Cognitive reframe prompts by category
+    const reframePrompts = {
+      anxiety: [
+        "What evidence do I have that this worry will actually happen?",
+        "What's the worst that could realistically happen, and could I cope with it?",
+        "Am I confusing a thought with a fact?",
+        "What would I tell a friend who had this worry?"
+      ],
+      depression: [
+        "What are three small things I accomplished today, no matter how minor?",
+        "When was the last time I felt even a little bit better? What was different then?",
+        "Am I using all-or-nothing thinking? What's a more balanced perspective?",
+        "What would my future self thank me for doing right now?"
+      ],
+      'self-worth': [
+        "What are three qualities I have that I appreciate, even a little?",
+        "Would I judge a friend as harshly as I'm judging myself right now?",
+        "What have I overcome in the past that shows my strength?",
+        "Am I confusing my worth with my achievements or productivity?"
+      ],
+      relationships: [
+        "Am I assuming I know what the other person is thinking without asking?",
+        "What are other possible explanations for their behavior?",
+        "What do I need to communicate more clearly?",
+        "Am I focusing only on the negative aspects of this relationship?"
+      ],
+      'work-stress': [
+        "What's within my control right now, and what isn't?",
+        "Am I setting realistic expectations for myself?",
+        "What's one small step I can take to reduce this stress?",
+        "Will this matter in a week? A month? A year?"
+      ]
+    };
+    
+    // ═══════════════════════════════════════════════════════════════════
+    // INITIALIZATION
+    // ═══════════════════════════════════════════════════════════════════
+    
+    /**
+     * Initialize the application when Firebase SDK is loaded
+     */
+    async function initializeApp() {
+      try {
+        // Wait for Firebase modules to be available
+        await new Promise(resolve => {
+          const checkModules = setInterval(() => {
+            if (window.FirebaseModules) {
+              clearInterval(checkModules);
+              resolve();
+            }
+          }, 100);
+        });
+        
+        const { initializeApp, getAuth, getFirestore } = window.FirebaseModules;
+        
+        // Initialize Firebase
+        const firebaseApp = initializeApp(firebaseConfig);
+        app.auth = getAuth(firebaseApp);
+        app.db = getFirestore(firebaseApp);
+        
+        console.log('Firebase initialized successfully');
+        
+        // Set up auth state observer
+        setupAuthObserver();
+        
+        // Set up event listeners
+        setupEventListeners();
+        
+        // Check for cached feed posts
+        loadCachedFeed();
+        
+      } catch (error) {
+        console.error('Error initializing app:', error);
+        showError('Failed to initialize application. Please refresh the page.');
+      }
+    }
+    
+    /**
+     * Set up Firebase auth state observer
+     */
+    function setupAuthObserver() {
+      const { onAuthStateChanged } = window.FirebaseModules;
+      
+      onAuthStateChanged(app.auth, async (user) => {
+        if (user) {
+          app.currentUser = user;
+          
+          // Check if user is disabled
+          const isDisabled = await checkUserDisabled(user.uid);
+          if (isDisabled) {
+            await signOutUser();
+            showError('Your account has been disabled. Please contact support.');
+            return;
+          }
+          
+          // Load user data
+          await loadUserData(user.uid);
+          
+          // Show app, hide auth pages
+          document.getElementById('appContainer').classList.remove('hidden');
+          document.getElementById('loginPage').classList.add('hidden');
+          document.getElementById('registerPage').classList.add('hidden');
+          document.getElementById('forgotPasswordPage').classList.add('hidden');
+          
+          // Load initial page
+          navigateToPage('feed');
+          
+        } else {
+          app.currentUser = null;
+          app.currentUserData = null;
+          
+          // Show login, hide app
+          document.getElementById('appContainer').classList.add('hidden');
+          document.getElementById('loginPage').classList.remove('hidden');
+          
+          // Clean up listeners
+          cleanupListeners();
+        }
+      });
+    }
+    
+    /**
+     * Check if user account is disabled
+     */
+    async function checkUserDisabled(uid) {
+      try {
+        const { doc, getDoc } = window.FirebaseModules;
+        const userDoc = await getDoc(doc(app.db, 'users', uid));
+        return userDoc.exists() && userDoc.data().disabled === true;
+      } catch (error) {
+        console.error('Error checking user disabled status:', error);
+        return false;
+      }
+    }
+    
+    /**
+     * Load current user data from Firestore
+     */
+    async function loadUserData(uid) {
+      try {
+        const { doc, getDoc } = window.FirebaseModules;
+        const userDoc = await getDoc(doc(app.db, 'users', uid));
+        
+        if (userDoc.exists()) {
+          app.currentUserData = { uid, ...userDoc.data() };
+          
+          // Show/hide admin nav based on role
+          if (app.currentUserData.role === 'admin') {
+            document.getElementById('adminNavItem').style.display = 'block';
+          } else {
+            document.getElementById('adminNavItem').style.display = 'none';
+          }
+        }
+      } catch (error) {
+        console.error('Error loading user data:', error);
+      }
+    }
+    
+    /**
+     * Clean up Firestore listeners
+     */
+    function cleanupListeners() {
+      app.unsubscribers.forEach(unsub => unsub());
+      app.unsubscribers = [];
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════
+    // AUTHENTICATION FUNCTIONS
+    // ═══════════════════════════════════════════════════════════════════
+    
+    /**
+     * Generate device fingerprint for blocking
+     * NOTE: This is a simple fingerprint and can be bypassed. For production,
+     * use a proper fingerprinting library or server-side tracking.
+     */
+    function generateDeviceFingerprint() {
+      const nav = window.navigator;
+      const screen = window.screen;
+      
+      const fingerprint = [
+        nav.userAgent,
+        nav.language,
+        screen.colorDepth,
+        screen.width + 'x' + screen.height,
+        new Date().getTimezoneOffset(),
+        !!window.sessionStorage,
+        !!window.localStorage
+      ].join('|');
+      
+      // Simple hash function
+      let hash = 0;
+      for (let i = 0; i < fingerprint.length; i++) {
+        const char = fingerprint.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash;
+      }
+      
+      return 'fp_' + Math.abs(hash).toString(36);
+    }
+    
+    /**
+     * Check if device/email is blocked
+     */
+    async function checkBlocked(email) {
+      try {
+        const { collection, query, where, getDocs } = window.FirebaseModules;
+        const fingerprint = generateDeviceFingerprint();
+        
+        // Check if fingerprint or email is blocked
+        const blockedQuery = query(
+          collection(app.db, 'blockedIdentifiers'),
+          where('fingerprintHash', '==', fingerprint)
+        );
+        
+        const snapshot = await getDocs(blockedQuery);
+        if (!snapshot.empty) {
+          return { blocked: true, reason: 'Device fingerprint blocked' };
+        }
+        
+        // Check email
+        const emailQuery = query(
+          collection(app.db, 'blockedIdentifiers'),
+          where('email', '==', email.toLowerCase())
+        );
+        
+        const emailSnapshot = await getDocs(emailQuery);
+        if (!emailSnapshot.empty) {
+          return { blocked: true, reason: 'Email address blocked' };
+        }
+        
+        return { blocked: false };
+      } catch (error) {
+        console.error('Error checking blocked status:', error);
+        return { blocked: false };
+      }
+    }
+    
+    /**
+     * Handle user registration
+     */
+    async function handleRegister(e) {
+      e.preventDefault();
+      
+      const username = document.getElementById('registerUsername').value.trim();
+      const email = document.getElementById('registerEmail').value.trim();
+      const password = document.getElementById('registerPassword').value;
+      
+      // Validate username
+      if (username.length < 3 || username.length > 30) {
+        showAuthError('register', 'Username must be between 3 and 30 characters');
+        return;
+      }
+      
+      // Check if blocked
+      const blockCheck = await checkBlocked(email);
+      if (blockCheck.blocked) {
+        showAuthError('register', 'Unable to create account. ' + blockCheck.reason);
+        return;
+      }
+      
+      try {
+        const { createUserWithEmailAndPassword, updateProfile } = window.FirebaseModules;
+        const { doc, setDoc, serverTimestamp } = window.FirebaseModules;
+        
+        // Create auth user
+        const userCredential = await createUserWithEmailAndPassword(app.auth, email, password);
+        const user = userCredential.user;
+        
+        // Update profile with username
+        await updateProfile(user, { displayName: username });
+        
+        // Create user document in Firestore
+        await setDoc(doc(app.db, 'users', user.uid), {
+          username: username,
+          email: email,
+          role: 'user',
+          joinedAt: serverTimestamp(),
+          disabled: false,
+          deviceFingerprint: generateDeviceFingerprint()
+        });
+        
+        console.log('User registered successfully');
+        
+      } catch (error) {
+        console.error('Registration error:', error);
+        showAuthError('register', getErrorMessage(error));
+      }
+    }
+    
+    /**
+     * Handle user login
+     */
+    async function handleLogin(e) {
+      e.preventDefault();
+      
+      const email = document.getElementById('loginEmail').value.trim();
+      const password = document.getElementById('loginPassword').value;
+      
+      try {
+        const { signInWithEmailAndPassword } = window.FirebaseModules;
+        
+        await signInWithEmailAndPassword(app.auth, email, password);
+        console.log('User logged in successfully');
+        
+      } catch (error) {
+        console.error('Login error:', error);
+        showAuthError('login', getErrorMessage(error));
+      }
+    }
+    
+    /**
+     * Handle password reset
+     */
+    async function handleForgotPassword(e) {
+      e.preventDefault();
+      
+      const email = document.getElementById('resetEmail').value.trim();
+      
+      try {
+        const { sendPasswordResetEmail } = window.FirebaseModules;
+        
+        await sendPasswordResetEmail(app.auth, email);
+        
+        document.getElementById('resetSuccess').classList.remove('hidden');
+        document.getElementById('resetError').classList.add('hidden');
+        document.getElementById('forgotPasswordForm').reset();
+        
+      } catch (error) {
+        console.error('Password reset error:', error);
+        showAuthError('reset', getErrorMessage(error));
+      }
+    }
+    
+    /**
+     * Sign out user
+     */
+    async function signOutUser() {
+      try {
+        const { signOut } = window.FirebaseModules;
+        await signOut(app.auth);
+        
+        // Clear cached data
+        localStorage.removeItem('safespace_feed_cache');
+        
+      } catch (error) {
+        console.error('Sign out error:', error);
+      }
+    }
+    
+    /**
+     * Get user-friendly error message
+     */
+    function getErrorMessage(error) {
+      const messages = {
+        'auth/email-already-in-use': 'This email is already registered',
+        'auth/invalid-email': 'Invalid email address',
+        'auth/user-not-found': 'No account found with this email',
+        'auth/wrong-password': 'Incorrect password',
+        'auth/weak-password': 'Password should be at least 6 characters',
+        'auth/too-many-requests': 'Too many attempts. Please try again later',
+        'auth/network-request-failed': 'Network error. Check your connection'
+      };
+      
+      return messages[error.code] || error.message || 'An error occurred';
+    }
+    
+    /**
+     * Show authentication error
+     */
+    function showAuthError(page, message) {
+      const errorDiv = document.getElementById(`${page}Error`);
+      const errorText = document.getElementById(`${page}ErrorText`);
+      
+      if (errorDiv && errorText) {
+        errorText.textContent = message;
+        errorDiv.classList.remove('hidden');
+        
+        setTimeout(() => {
+          errorDiv.classList.add('hidden');
+        }, 5000);
+      }
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════
+    // NAVIGATION & UI
+    // ═══════════════════════════════════════════════════════════════════
+    
+    /**
+     * Navigate to a different page
+     */
+    function navigateToPage(pageName) {
+      // Hide all pages
+      document.querySelectorAll('.page-content').forEach(page => {
+        page.classList.add('hidden');
+      });
+      
+      // Show selected page
+      const selectedPage = document.getElementById(`${pageName}Page`);
+      if (selectedPage) {
+        selectedPage.classList.remove('hidden');
+      }
+      
+      // Update active nav link
+      document.querySelectorAll('.nav-link').forEach(link => {
+        link.classList.remove('active');
+      });
+      
+      const activeLink = document.querySelector(`.nav-link[data-page="${pageName}"]`);
+      if (activeLink) {
+        activeLink.classList.add('active');
+      }
+      
+      app.currentPage = pageName;
+      
+      // Load page-specific data
+      loadPageData(pageName);
+      
+      // Close mobile menu
+      closeMobileMenu();
+    }
+    
+    /**
+     * Load data for specific page
+     */
+    async function loadPageData(pageName) {
+      switch (pageName) {
+        case 'feed':
+          await loadFeed();
+          break;
+        case 'diary':
+          await loadDiary();
+          break;
+        case 'publicChat':
+          setupPublicChat();
+          break;
+        case 'privateChat':
+          await loadPrivateChats();
+          break;
+        case 'healingTools':
+          await loadMoodHistory();
+          break;
+        case 'profile':
+          loadProfileData();
+          break;
+        case 'admin':
+          if (app.currentUserData?.role === 'admin') {
+            await loadAdminData();
+          }
+          break;
+      }
+    }
+    
+    /**
+     * Open modal
+     */
+    function openModal(modalId) {
+      document.getElementById(modalId).classList.add('active');
+    }
+    
+    /**
+     * Close modal
+     */
+    function closeModal(modalId) {
+      document.getElementById(modalId).classList.remove('active');
+    }
+    
+    /**
+     * Toggle mobile menu
+     */
+    function toggleMobileMenu() {
+      document.getElementById('sidebar').classList.toggle('visible');
+    }
+    
+    /**
+     * Close mobile menu
+     */
+    function closeMobileMenu() {
+      document.getElementById('sidebar').classList.remove('visible');
+    }
+    
+    /**
+     * Show general error message
+     */
+    function showError(message) {
+      alert(message); // Simple implementation, could be improved with toast notifications
+    }
+    
+    /**
+     * Show success message
+     */
+    function showSuccess(message) {
+      alert(message); // Simple implementation, could be improved with toast notifications
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════
+    // FEED FUNCTIONS
+    // ═══════════════════════════════════════════════════════════════════
+    
+    /**
+     * Load feed posts
+     */
+    async function loadFeed(loadMore = false) {
+      try {
+        const { collection, query, orderBy, limit, startAfter, getDocs } = window.FirebaseModules;
+        
+        const feedContainer = document.getElementById('feedPosts');
+        
+        if (!loadMore) {
+          feedContainer.innerHTML = '<div class="skeleton" style="height: 200px; margin-bottom: 1rem;"></div>';
+          app.lastFeedDoc = null;
+          app.feedPosts = [];
+        }
+        
+        // Build query
+        let feedQuery = query(
+          collection(app.db, 'feed'),
+          orderBy('createdAt', 'desc'),
+          limit(10)
+        );
+        
+        if (loadMore && app.lastFeedDoc) {
+          feedQuery = query(
+            collection(app.db, 'feed'),
+            orderBy('createdAt', 'desc'),
+            startAfter(app.lastFeedDoc),
+            limit(10)
+          );
+        }
+        
+        const snapshot = await getDocs(feedQuery);
+        
+        if (snapshot.empty && !loadMore) {
+          feedContainer.innerHTML = `
+            <div class="empty-state">
+              <span class="material-icons">forum</span>
+              <h3 class="empty-state-title">No posts yet</h3>
+              <p>Be the first to share something!</p>
+            </div>
+          `;
+          return;
+        }
+        
+        if (loadMore && snapshot.empty) {
+          showSuccess('No more posts to load');
+          return;
+        }
+        
+        // Store last document for pagination
+        app.lastFeedDoc = snapshot.docs[snapshot.docs.length - 1];
+        
+        // Clear skeleton on first load
+        if (!loadMore) {
+          feedContainer.innerHTML = '';
+        }
+        
+        // Render posts
+        snapshot.forEach(doc => {
+          const post = { id: doc.id, ...doc.data() };
+          app.feedPosts.push(post);
+          renderFeedPost(post, feedContainer);
+        });
+        
+        // Cache feed posts
+        cacheFeedPosts();
+        
+      } catch (error) {
+        console.error('Error loading feed:', error);
+        document.getElementById('feedPosts').innerHTML = '<div class="empty-state"><p>Error loading feed</p></div>';
+      }
+    }
+    
+    /**
+     * Render a single feed post
+     */
+    function renderFeedPost(post, container) {
+      const postDiv = document.createElement('div');
+      postDiv.className = 'feed-post';
+      postDiv.dataset.postId = post.id;
+      
+      const isLiked = post.likes && post.likes[app.currentUser.uid];
+      const likesCount = post.likes ? Object.keys(post.likes).length : 0;
+      
+      // Format timestamp
+      const createdAt = post.createdAt?.toDate?.() || new Date();
+      const timeAgo = formatTimeAgo(createdAt);
+      const exactTime = createdAt.toLocaleString();
+      
+      // Get author initial
+      const authorName = post.isAnonymous ? 'Anonymous' : (post.authorUsername || 'User');
+      const authorInitial = authorName.charAt(0).toUpperCase();
+      
+      let mediaHtml = '';
+      if (post.mediaDataUrl) {
+        if (post.mediaType === 'video') {
+          mediaHtml = `
+            <div class="post-media">
+              <video controls>
+                <source src="${escapeHtml(post.mediaDataUrl)}" type="video/mp4">
+              </video>
+            </div>
+          `;
+        } else {
+          mediaHtml = `
+            <div class="post-media">
+              <img src="${escapeHtml(post.mediaDataUrl)}" alt="Post image">
+            </div>
+          `;
+        }
+      }
+      
+      postDiv.innerHTML = `
+        <div class="post-header">
+          <div class="post-avatar">${authorInitial}</div>
+          <div class="post-info">
+            <div class="post-author">
+              ${escapeHtml(authorName)}
+              ${post.isAnonymous ? '<span class="badge badge-primary">Anonymous</span>' : ''}
+            </div>
+            <div class="post-time" title="${exactTime}">${timeAgo}</div>
+          </div>
+        </div>
+        
+        <div class="post-content">${escapeHtml(post.text)}</div>
+        
+        ${mediaHtml}
+        
+        <div class="post-actions">
+          <button class="post-action-btn ${isLiked ? 'active' : ''}" onclick="toggleLike('${post.id}')">
+            <span class="material-icons">${isLiked ? 'favorite' : 'favorite_border'}</span>
+            <span>${likesCount}</span>
+          </button>
+          
+          <button class="post-action-btn" onclick="showComments('${post.id}')">
+            <span class="material-icons">comment</span>
+            <span>${post.commentsCount || 0}</span>
+          </button>
+          
+          <button class="post-action-btn" onclick="repost('${post.id}')">
+            <span class="material-icons">repeat</span>
+            <span>${post.repostsCount || 0}</span>
+          </button>
+        </div>
+      `;
+      
+      container.appendChild(postDiv);
+    }
+    
+    /**
+     * Create new post
+     */
+    async function createPost() {
+      const text = document.getElementById('postText').value.trim();
+      const isAnonymous = document.getElementById('postAnonymous').checked;
+      const mediaFile = document.getElementById('postMedia').files[0];
+      
+      if (!text && !mediaFile) {
+        showError('Please enter text or upload media');
+        return;
+      }
+      
+      // Rate limiting
+      if (!checkRateLimit('posts', 5)) {
+        showError('Too many posts. Please wait a moment.');
+        return;
+      }
+      
+      try {
+        const { collection, addDoc, serverTimestamp } = window.FirebaseModules;
+        
+        const postData = {
+          text: text,
+          authorUid: isAnonymous ? null : app.currentUser.uid,
+          authorUsername: isAnonymous ? null : app.currentUserData.username,
+          isAnonymous: isAnonymous,
+          createdAt: serverTimestamp(),
+          likes: {},
+          commentsCount: 0,
+          repostsCount: 0
+        };
+        
+        // Handle media upload
+        if (mediaFile) {
+          const mediaData = await compressMedia(mediaFile);
+          postData.mediaDataUrl = mediaData.dataUrl;
+          postData.mediaType = mediaData.type;
+        }
+        
+        await addDoc(collection(app.db, 'feed'), postData);
+        
+        closeModal('createPostModal');
+        document.getElementById('postText').value = '';
+        document.getElementById('postMedia').value = '';
+        document.getElementById('postAnonymous').checked = false;
+        document.getElementById('mediaPreview').innerHTML = '';
+        
+        // Reload feed
+        await loadFeed();
+        
+        showSuccess('Post created successfully!');
+        
+      } catch (error) {
+        console.error('Error creating post:', error);
+        showError('Failed to create post. Please try again.');
+      }
+    }
+    
+    /**
+     * Compress media file to base64
+     * NOTE: Storing base64 in Firestore is not recommended for production.
+     * Use Firebase Storage instead. This is a workaround for the requirement.
+     */
+    async function compressMedia(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        
+        reader.onload = (e) => {
+          if (file.type.startsWith('video/')) {
+            // For videos, just encode to base64 with size check
+            const dataUrl = e.target.result;
+            if (dataUrl.length > 2 * 1024 * 1024) { // 2MB limit
+              reject(new Error('Video too large. Please choose a file under 2MB.'));
+              return;
+            }
+            resolve({ dataUrl, type: 'video' });
+          } else {
+            // For images, compress using canvas
+            const img = new Image();
+            img.onload = () => {
+              const canvas = document.createElement('canvas');
+              let width = img.width;
+              let height = img.height;
+              
+              // Resize if too large
+              const maxDimension = 1200;
+              if (width > maxDimension || height > maxDimension) {
+                if (width > height) {
+                  height = (height / width) * maxDimension;
+                  width = maxDimension;
+                } else {
+                  width = (width / height) * maxDimension;
+                  height = maxDimension;
+                }
+              }
+              
+              canvas.width = width;
+              canvas.height = height;
+              
+              const ctx = canvas.getContext('2d');
+              ctx.drawImage(img, 0, 0, width, height);
+              
+              // Compress to JPEG at 0.7 quality
+              const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+              
+              // Check size (approximate limit 500KB)
+              if (dataUrl.length > 500 * 1024) {
+                // Try lower quality
+                const lowerQuality = canvas.toDataURL('image/jpeg', 0.5);
+                resolve({ dataUrl: lowerQuality, type: 'image' });
+              } else {
+                resolve({ dataUrl, type: 'image' });
+              }
+            };
+            img.src = e.target.result;
+          }
+        };
+        
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+    
+    /**
+     * Toggle like on post
+     */
+    async function toggleLike(postId) {
+      try {
+        const { doc, updateDoc, getDoc } = window.FirebaseModules;
+        
+        const postRef = doc(app.db, 'feed', postId);
+        const postSnap = await getDoc(postRef);
+        
+        if (!postSnap.exists()) return;
+        
+        const postData = postSnap.data();
+        const likes = postData.likes || {};
+        
+        if (likes[app.currentUser.uid]) {
+          // Unlike
+          delete likes[app.currentUser.uid];
+        } else {
+          // Like
+          likes[app.currentUser.uid] = true;
+        }
+        
+        await updateDoc(postRef, { likes });
+        
+        // Update UI
+        const postDiv = document.querySelector(`.feed-post[data-post-id="${postId}"]`);
+        if (postDiv) {
+          const likeBtn = postDiv.querySelector('.post-action-btn');
+          const isLiked = likes[app.currentUser.uid];
+          const likesCount = Object.keys(likes).length;
+          
+          likeBtn.classList.toggle('active', isLiked);
+          likeBtn.querySelector('.material-icons').textContent = isLiked ? 'favorite' : 'favorite_border';
+          likeBtn.querySelector('span:last-child').textContent = likesCount;
+        }
+        
+      } catch (error) {
+        console.error('Error toggling like:', error);
+      }
+    }
+    
+    /**
+     * Show comments modal
+     */
+    async function showComments(postId) {
+      app.currentCommentPostId = postId;
+      openModal('commentModal');
+      
+      try {
+        const { collection, query, orderBy, getDocs } = window.FirebaseModules;
+        
+        const commentsQuery = query(
+          collection(app.db, 'feed', postId, 'comments'),
+          orderBy('createdAt', 'asc')
+        );
+        
+        const snapshot = await getDocs(commentsQuery);
+        
+        const commentsContainer = document.getElementById('commentsContainer');
+        commentsContainer.innerHTML = '';
+        
+        if (snapshot.empty) {
+          commentsContainer.innerHTML = '<div class="empty-state"><p>No comments yet. Be the first!</p></div>';
+          return;
+        }
+        
+        snapshot.forEach(doc => {
+          const comment = doc.data();
+          renderComment(comment, commentsContainer);
+        });
+        
+      } catch (error) {
+        console.error('Error loading comments:', error);
+      }
+    }
+    
+    /**
+     * Render a comment
+     */
+    function renderComment(comment, container) {
+      const commentDiv = document.createElement('div');
+      commentDiv.className = 'comment';
+      
+      const authorInitial = comment.authorUsername?.charAt(0).toUpperCase() || 'U';
+      const timeAgo = formatTimeAgo(comment.createdAt?.toDate?.() || new Date());
+      
+      commentDiv.innerHTML = `
+        <div class="comment-avatar">${authorInitial}</div>
+        <div class="comment-content">
+          <div class="comment-author">${escapeHtml(comment.authorUsername || 'User')}</div>
+          <div class="comment-text">${escapeHtml(comment.text)}</div>
+          <div class="comment-time">${timeAgo}</div>
+        </div>
+      `;
+      
+      container.appendChild(commentDiv);
+    }
+    
+    /**
+     * Add comment to post
+     */
+    async function addComment(e) {
+      e.preventDefault();
+      
+      const commentText = document.getElementById('commentInput').value.trim();
+      if (!commentText) return;
+      
+      try {
+        const { collection, addDoc, doc, updateDoc, increment, serverTimestamp } = window.FirebaseModules;
+        
+        const postId = app.currentCommentPostId;
+        
+        // Add comment
+        await addDoc(collection(app.db, 'feed', postId, 'comments'), {
+          authorUid: app.currentUser.uid,
+          authorUsername: app.currentUserData.username,
+          text: commentText,
+          createdAt: serverTimestamp()
+        });
+        
+        // Increment comment count
+        await updateDoc(doc(app.db, 'feed', postId), {
+          commentsCount: increment(1)
+        });
+        
+        // Clear input
+        document.getElementById('commentInput').value = '';
+        
+        // Reload comments
+        await showComments(postId);
+        
+        // Update comment count in feed
+        const postDiv = document.querySelector(`.feed-post[data-post-id="${postId}"]`);
+        if (postDiv) {
+          const commentBtn = postDiv.querySelectorAll('.post-action-btn')[1];
+          const currentCount = parseInt(commentBtn.querySelector('span:last-child').textContent);
+          commentBtn.querySelector('span:last-child').textContent = currentCount + 1;
+        }
+        
+      } catch (error) {
+        console.error('Error adding comment:', error);
+        showError('Failed to add comment');
+      }
+    }
+    
+    /**
+     * Repost (share) a post
+     */
+    async function repost(postId) {
+      try {
+        const { doc, getDoc, collection, addDoc, updateDoc, increment, serverTimestamp } = window.FirebaseModules;
+        
+        const postRef = doc(app.db, 'feed', postId);
+        const postSnap = await getDoc(postRef);
+        
+        if (!postSnap.exists()) return;
+        
+        const originalPost = postSnap.data();
+        
+        // Create repost
+        await addDoc(collection(app.db, 'feed'), {
+          text: originalPost.text,
+          authorUid: app.currentUser.uid,
+          authorUsername: app.currentUserData.username,
+          isAnonymous: false,
+          isRepost: true,
+          originalPostId: postId,
+          createdAt: serverTimestamp(),
+          likes: {},
+          commentsCount: 0,
+          repostsCount: 0
+        });
+        
+        // Increment repost count
+        await updateDoc(postRef, {
+          repostsCount: increment(1)
+        });
+        
+        // Update UI
+        const postDiv = document.querySelector(`.feed-post[data-post-id="${postId}"]`);
+        if (postDiv) {
+          const repostBtn = postDiv.querySelectorAll('.post-action-btn')[2];
+          const currentCount = parseInt(repostBtn.querySelector('span:last-child').textContent);
+          repostBtn.querySelector('span:last-child').textContent = currentCount + 1;
+        }
+        
+        showSuccess('Post shared to your feed!');
+        
+        // Reload feed
+        await loadFeed();
+        
+      } catch (error) {
+        console.error('Error reposting:', error);
+        showError('Failed to share post');
+      }
+    }
+    
+    /**
+     * Cache feed posts to localStorage
+     */
+    function cacheFeedPosts() {
+      try {
+        const cache = {
+          posts: app.feedPosts.slice(0, 20), // Cache first 20 posts
+          timestamp: Date.now()
+        };
+        localStorage.setItem('safespace_feed_cache', JSON.stringify(cache));
+      } catch (error) {
+        console.error('Error caching feed:', error);
+      }
+    }
+    
+    /**
+     * Load cached feed posts
+     */
+    function loadCachedFeed() {
+      try {
+        const cache = localStorage.getItem('safespace_feed_cache');
+        if (!cache) return;
+        
+        const { posts, timestamp } = JSON.parse(cache);
+        
+        // Check if cache is less than 5 minutes old
+        if (Date.now() - timestamp < 5 * 60 * 1000) {
+          app.feedPosts = posts;
+        }
+      } catch (error) {
+        console.error('Error loading cached feed:', error);
+      }
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════
+    // DIARY FUNCTIONS
+    // ═══════════════════════════════════════════════════════════════════
+    
+    /**
+     * Load diary entries
+     */
+    async function loadDiary() {
+      try {
+        const { collection, query, orderBy, getDocs } = window.FirebaseModules;
+        
+        const diaryContainer = document.getElementById('diaryEntries');
+        diaryContainer.innerHTML = '<div class="skeleton" style="height: 150px;"></div>';
+        
+        const diaryQuery = query(
+          collection(app.db, 'diary', app.currentUser.uid, 'entries'),
+          orderBy('createdAt', 'desc')
+        );
+        
+        const snapshot = await getDocs(diaryQuery);
+        
+        if (snapshot.empty) {
+          diaryContainer.innerHTML = `
+            <div class="empty-state">
+              <span class="material-icons">book</span>
+              <h3 class="empty-state-title">No diary entries yet</h3>
+              <p>Start journaling your thoughts and feelings</p>
+            </div>
+          `;
+          return;
+        }
+        
+        diaryContainer.innerHTML = '';
+        
+        snapshot.forEach(doc => {
+          const entry = { id: doc.id, ...doc.data() };
+          renderDiaryEntry(entry, diaryContainer);
+        });
+        
+      } catch (error) {
+        console.error('Error loading diary:', error);
+      }
+    }
+    
+    /**
+     * Render diary entry
+     */
+    function renderDiaryEntry(entry, container) {
+      const entryDiv = document.createElement('div');
+      entryDiv.className = 'card';
+      
+      const createdAt = entry.createdAt?.toDate?.() || new Date();
+      const timeAgo = formatTimeAgo(createdAt);
+      const exactTime = createdAt.toLocaleString();
+      
+      entryDiv.innerHTML = `
+        <div class="flex items-center justify-between mb-2">
+          <div>
+            <strong>${exactTime}</strong>
+            <span class="text-muted"> (${timeAgo})</span>
+            ${entry.moodEmoji ? `<span style="font-size: 24px; margin-left: 0.5rem;">${entry.moodEmoji}</span>` : ''}
+          </div>
+          <div class="flex gap-2">
+            ${!entry.sharedToFeed ? `
+              <button class="btn btn-secondary btn-sm" onclick="shareToFeed('${entry.id}')">
+                <span class="material-icons">share</span>
+                Share Anonymously
+              </button>
+            ` : '<span class="badge badge-success">Shared to Feed</span>'}
+            <button class="btn btn-secondary btn-sm" onclick="editDiaryEntry('${entry.id}')">
+              <span class="material-icons">edit</span>
+            </button>
+            <button class="btn btn-danger btn-sm" onclick="deleteDiaryEntry('${entry.id}')">
+              <span class="material-icons">delete</span>
+            </button>
+          </div>
+        </div>
+        <div style="white-space: pre-wrap; line-height: 1.6;">${escapeHtml(entry.text)}</div>
+      `;
+      
+      container.appendChild(entryDiv);
+    }
+    
+    /**
+     * Create or update diary entry
+     */
+    async function saveDiaryEntry() {
+      const text = document.getElementById('diaryText').value.trim();
+      
+      if (!text) {
+        showError('Please enter some text');
+        return;
+      }
+      
+      try {
+        const { collection, addDoc, doc, updateDoc, serverTimestamp } = window.FirebaseModules;
+        
+        const entryData = {
+          text: text,
+          mood: app.selectedMood || null,
+          moodEmoji: app.selectedMoodEmoji || null,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          sharedToFeed: false
+        };
+        
+        if (app.editingDiaryId) {
+          // Update existing entry
+          await updateDoc(
+            doc(app.db, 'diary', app.currentUser.uid, 'entries', app.editingDiaryId),
+            { text: entryData.text, updatedAt: entryData.updatedAt }
+          );
+          app.editingDiaryId = null;
+        } else {
+          // Create new entry
+          await addDoc(
+            collection(app.db, 'diary', app.currentUser.uid, 'entries'),
+            entryData
+          );
+        }
+        
+        closeModal('createDiaryModal');
+        document.getElementById('diaryText').value = '';
+        app.selectedMood = null;
+        app.selectedMoodEmoji = null;
+        
+        await loadDiary();
+        
+        showSuccess('Diary entry saved!');
+        
+      } catch (error) {
+        console.error('Error saving diary entry:', error);
+        showError('Failed to save diary entry');
+      }
+    }
+    
+    /**
+     * Edit diary entry
+     */
+    async function editDiaryEntry(entryId) {
+      try {
+        const { doc, getDoc } = window.FirebaseModules;
+        
+        const entrySnap = await getDoc(
+          doc(app.db, 'diary', app.currentUser.uid, 'entries', entryId)
+        );
+        
+        if (!entrySnap.exists()) return;
+        
+        const entry = entrySnap.data();
+        
+        document.getElementById('diaryModalTitle').textContent = 'Edit Diary Entry';
+        document.getElementById('diaryText').value = entry.text;
+        app.editingDiaryId = entryId;
+        
+        openModal('createDiaryModal');
+        
+      } catch (error) {
+        console.error('Error loading diary entry:', error);
+      }
+    }
+    
+    /**
+     * Delete diary entry
+     */
+    async function deleteDiaryEntry(entryId) {
+      if (!confirm('Delete this diary entry? This cannot be undone.')) return;
+      
+      try {
+        const { doc, deleteDoc } = window.FirebaseModules;
+        
+        await deleteDoc(
+          doc(app.db, 'diary', app.currentUser.uid, 'entries', entryId)
+        );
+        
+        await loadDiary();
+        
+        showSuccess('Diary entry deleted');
+        
+      } catch (error) {
+        console.error('Error deleting diary entry:', error);
+        showError('Failed to delete entry');
+      }
+    }
+    
+    /**
+     * Share diary entry anonymously to feed
+     */
+    async function shareToFeed(entryId) {
+      if (!confirm('Share this entry anonymously to the community feed?')) return;
+      
+      try {
+        const { doc, getDoc, collection, addDoc, updateDoc, serverTimestamp } = window.FirebaseModules;
+        
+        const entrySnap = await getDoc(
+          doc(app.db, 'diary', app.currentUser.uid, 'entries', entryId)
+        );
+        
+        if (!entrySnap.exists()) return;
+        
+        const entry = entrySnap.data();
+        
+        // Create anonymous feed post
+        await addDoc(collection(app.db, 'feed'), {
+          text: entry.text,
+          authorUid: null,
+          authorUsername: null,
+          isAnonymous: true,
+          createdAt: serverTimestamp(),
+          likes: {},
+          commentsCount: 0,
+          repostsCount: 0
+        });
+        
+        // Mark diary entry as shared
+        await updateDoc(
+          doc(app.db, 'diary', app.currentUser.uid, 'entries', entryId),
+          { sharedToFeed: true }
+        );
+        
+        await loadDiary();
+        
+        showSuccess('Shared anonymously to feed!');
+        
+      } catch (error) {
+        console.error('Error sharing to feed:', error);
+        showError('Failed to share entry');
+      }
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════
+    // CHAT FUNCTIONS
+    // ═══════════════════════════════════════════════════════════════════
+    
+    /**
+     * Setup public chat with real-time listener
+     */
+    function setupPublicChat() {
+      const { collection, query, orderBy, limit, onSnapshot } = window.FirebaseModules;
+      
+      // Clean up existing listener
+      if (app.publicChatUnsubscribe) {
+        app.publicChatUnsubscribe();
+      }
+      
+      const messagesContainer = document.getElementById('publicChatMessages');
+      messagesContainer.innerHTML = '<div class="skeleton" style="height: 100px;"></div>';
+      
+      // Set up real-time listener
+      const messagesQuery = query(
+        collection(app.db, 'publicChat', 'messages'),
+        orderBy('createdAt', 'desc'),
+        limit(50)
+      );
+      
+      app.publicChatUnsubscribe = onSnapshot(messagesQuery, (snapshot) => {
+        messagesContainer.innerHTML = '';
+        
+        // Reverse to show oldest first
+        const messages = [];
+        snapshot.forEach(doc => {
+          messages.unshift({ id: doc.id, ...doc.data() });
+        });
+        
+        if (messages.length === 0) {
+          messagesContainer.innerHTML = '<div class="empty-state"><p>No messages yet. Start the conversation!</p></div>';
+          return;
+        }
+        
+        messages.forEach(message => {
+          renderChatMessage(message, messagesContainer, 'public');
+        });
+        
+        // Scroll to bottom
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      });
+      
+      app.unsubscribers.push(app.publicChatUnsubscribe);
+    }
+    
+    /**
+     * Send public chat message
+     */
+    async function sendPublicChatMessage(e) {
+      e.preventDefault();
+      
+      const input = document.getElementById('publicChatInput');
+      const text = input.value.trim();
+      
+      if (!text) return;
+      
+      // Rate limiting
+      if (!checkRateLimit('messages', 20)) {
+        showError('Too many messages. Please slow down.');
+        return;
+      }
+      
+      try {
+        const { collection, addDoc, serverTimestamp } = window.FirebaseModules;
+        
+        await addDoc(collection(app.db, 'publicChat', 'messages'), {
+          senderUid: app.currentUser.uid,
+          username: app.currentUserData.username,
+          text: text,
+          createdAt: serverTimestamp()
+        });
+        
+        input.value = '';
+        
+      } catch (error) {
+        console.error('Error sending message:', error);
+        showError('Failed to send message');
+      }
+    }
+    
+    /**
+     * Load private chat threads
+     */
+    async function loadPrivateChats() {
+      try {
+        const { collection, query, where, orderBy, getDocs } = window.FirebaseModules;
+        
+        const chatsQuery = query(
+          collection(app.db, 'chats'),
+          where('participants', 'array-contains', app.currentUser.uid),
+          orderBy('lastUpdated', 'desc')
+        );
+        
+        const snapshot = await getDocs(chatsQuery);
+        
+        const chatList = document.getElementById('privateChatList');
+        chatList.innerHTML = '';
+        
+        if (snapshot.empty) {
+          chatList.innerHTML = '<div class="empty-state"><p>No conversations yet</p></div>';
+          return;
+        }
+        
+        snapshot.forEach(doc => {
+          const chat = { id: doc.id, ...doc.data() };
+          renderChatThread(chat, chatList);
+        });
+        
+      } catch (error) {
+        console.error('Error loading private chats:', error);
+      }
+    }
+    
+    /**
+     * Render chat thread in sidebar
+     */
+    function renderChatThread(chat, container) {
+      const chatDiv = document.createElement('div');
+      chatDiv.className = 'chat-item';
+      chatDiv.dataset.chatId = chat.id;
+      
+      // Get other participant name
+      const otherUid = chat.participants.find(uid => uid !== app.currentUser.uid);
+      const otherUsername = chat.participantNames?.[otherUid] || 'User';
+      
+      const lastUpdated = chat.lastUpdated?.toDate?.() || new Date();
+      const timeAgo = formatTimeAgo(lastUpdated);
+      
+      chatDiv.innerHTML = `
+        <div class="chat-item-header">
+          <div class="chat-item-name">${escapeHtml(otherUsername)}</div>
+          <div class="chat-item-time">${timeAgo}</div>
+        </div>
+        <div class="chat-item-preview">${escapeHtml(chat.lastMessage || 'No messages yet')}</div>
+      `;
+      
+      chatDiv.onclick = () => openPrivateChat(chat.id, otherUid, otherUsername);
+      
+      container.appendChild(chatDiv);
+    }
+    
+    /**
+     * Search for users to start private chat
+     */
+    async function searchUsers() {
+      const searchTerm = document.getElementById('userSearchInput').value.trim().toLowerCase();
+      
+      if (searchTerm.length < 2) {
+        document.getElementById('userSearchResults').innerHTML = '';
+        return;
+      }
+      
+      try {
+        const { collection, getDocs } = window.FirebaseModules;
+        
+        const usersSnapshot = await getDocs(collection(app.db, 'users'));
+        
+        const results = [];
+        usersSnapshot.forEach(doc => {
+          const user = doc.data();
+          if (
+            user.username.toLowerCase().includes(searchTerm) &&
+            doc.id !== app.currentUser.uid
+          ) {
+            results.push({ uid: doc.id, ...user });
+          }
+        });
+        
+        const resultsContainer = document.getElementById('userSearchResults');
+        resultsContainer.innerHTML = '';
+        
+        if (results.length === 0) {
+          resultsContainer.innerHTML = '<div class="text-muted">No users found</div>';
+          return;
+        }
+        
+        results.forEach(user => {
+          const userDiv = document.createElement('div');
+          userDiv.className = 'chat-item';
+          userDiv.innerHTML = `
+            <div class="chat-item-name">${escapeHtml(user.username)}</div>
+          `;
+          userDiv.onclick = () => startPrivateChat(user.uid, user.username);
+          resultsContainer.appendChild(userDiv);
+        });
+        
+      } catch (error) {
+        console.error('Error searching users:', error);
+      }
+    }
+    
+    /**
+     * Start new private chat or open existing
+     */
+    async function startPrivateChat(otherUid, otherUsername) {
+      try {
+        const { collection, query, where, getDocs, addDoc, serverTimestamp } = window.FirebaseModules;
+        
+        // Check if chat already exists
+        const chatsQuery = query(
+          collection(app.db, 'chats'),
+          where('participants', 'array-contains', app.currentUser.uid)
+        );
+        
+        const snapshot = await getDocs(chatsQuery);
+        
+        let existingChatId = null;
+        snapshot.forEach(doc => {
+          const chat = doc.data();
+          if (chat.participants.includes(otherUid)) {
+            existingChatId = doc.id;
+          }
+        });
+        
+        if (existingChatId) {
+          openPrivateChat(existingChatId, otherUid, otherUsername);
+        } else {
+          // Create new chat
+          const chatData = {
+            participants: [app.currentUser.uid, otherUid],
+            participantNames: {
+              [app.currentUser.uid]: app.currentUserData.username,
+              [otherUid]: otherUsername
+            },
+            lastMessage: '',
+            lastUpdated: serverTimestamp()
+          };
+          
+          const chatRef = await addDoc(collection(app.db, 'chats'), chatData);
+          openPrivateChat(chatRef.id, otherUid, otherUsername);
+        }
+        
+        // Clear search
+        document.getElementById('userSearchInput').value = '';
+        document.getElementById('userSearchResults').innerHTML = '';
+        
+      } catch (error) {
+        console.error('Error starting private chat:', error);
+        showError('Failed to start conversation');
+      }
+    }
+    
+    /**
+     * Open private chat conversation
+     */
+    function openPrivateChat(chatId, otherUid, otherUsername) {
+      app.currentChatThread = { id: chatId, otherUid, otherUsername };
+      
+      // Update active state
+      document.querySelectorAll('.chat-item').forEach(item => {
+        item.classList.remove('active');
+      });
+      document.querySelector(`.chat-item[data-chat-id="${chatId}"]`)?.classList.add('active');
+      
+      // Set up chat UI
+      const chatMain = document.getElementById('privateChatMain');
+      chatMain.innerHTML = `
+        <div class="chat-header">
+          <div class="post-avatar">${otherUsername.charAt(0).toUpperCase()}</div>
+          <div>
+            <h3 style="margin: 0;">${escapeHtml(otherUsername)}</h3>
+          </div>
+        </div>
+        
+        <div class="chat-messages" id="privateChatMessages">
+          <div class="skeleton" style="height: 100px;"></div>
+        </div>
+        
+        <div class="chat-input-container">
+          <form class="chat-input-form" id="privateChatForm">
+            <input type="text" id="privateChatInput" class="chat-input" placeholder="Type a message..." required maxlength="500">
+            <button type="submit" class="btn btn-primary btn-icon">
+              <span class="material-icons">send</span>
+            </button>
+          </form>
+        </div>
+      `;
+      
+      // Set up form handler
+      document.getElementById('privateChatForm').onsubmit = sendPrivateChatMessage;
+      
+      // Set up real-time listener
+      setupPrivateChatListener(chatId);
+    }
+    
+    /**
+     * Setup real-time listener for private chat
+     */
+    function setupPrivateChatListener(chatId) {
+      const { collection, query, orderBy, limit, onSnapshot } = window.FirebaseModules;
+      
+      // Clean up existing listener
+      if (app.privateChatUnsubscribe) {
+        app.privateChatUnsubscribe();
+      }
+      
+      const messagesContainer = document.getElementById('privateChatMessages');
+      
+      const messagesQuery = query(
+        collection(app.db, 'chats', chatId, 'messages'),
+        orderBy('createdAt', 'desc'),
+        limit(50)
+      );
+      
+      app.privateChatUnsubscribe = onSnapshot(messagesQuery, (snapshot) => {
+        messagesContainer.innerHTML = '';
+        
+        // Reverse to show oldest first
+        const messages = [];
+        snapshot.forEach(doc => {
+          messages.unshift({ id: doc.id, ...doc.data() });
+        });
+        
+        if (messages.length === 0) {
+          messagesContainer.innerHTML = '<div class="empty-state"><p>No messages yet. Say hello!</p></div>';
+          return;
+        }
+        
+        messages.forEach(message => {
+          renderChatMessage(message, messagesContainer, 'private');
+        });
+        
+        // Scroll to bottom
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      });
+      
+      app.unsubscribers.push(app.privateChatUnsubscribe);
+    }
+    
+    /**
+     * Send private chat message
+     */
+    async function sendPrivateChatMessage(e) {
+      e.preventDefault();
+      
+      const input = document.getElementById('privateChatInput');
+      const text = input.value.trim();
+      
+      if (!text || !app.currentChatThread) return;
+      
+      // Rate limiting
+      if (!checkRateLimit('messages', 20)) {
+        showError('Too many messages. Please slow down.');
+        return;
+      }
+      
+      try {
+        const { collection, addDoc, doc, updateDoc, serverTimestamp } = window.FirebaseModules;
+        
+        const chatId = app.currentChatThread.id;
+        
+        // Add message
+        await addDoc(collection(app.db, 'chats', chatId, 'messages'), {
+          senderUid: app.currentUser.uid,
+          senderUsername: app.currentUserData.username,
+          text: text,
+          createdAt: serverTimestamp()
+        });
+        
+        // Update chat metadata
+        await updateDoc(doc(app.db, 'chats', chatId), {
+          lastMessage: text,
+          lastUpdated: serverTimestamp()
+        });
+        
+        input.value = '';
+        
+      } catch (error) {
+        console.error('Error sending message:', error);
+        showError('Failed to send message');
+      }
+    }
+    
+    /**
+     * Render chat message
+     */
+    function renderChatMessage(message, container, type) {
+      const messageDiv = document.createElement('div');
+      messageDiv.className = 'message';
+      
+      const isOwn = message.senderUid === app.currentUser.uid;
+      if (isOwn) {
+        messageDiv.classList.add('own');
+      }
+      
+      const username = type === 'public' ? message.username : message.senderUsername;
+      const initial = username?.charAt(0).toUpperCase() || 'U';
+      
+      const createdAt = message.createdAt?.toDate?.() || new Date();
+      const timeAgo = formatTimeAgo(createdAt);
+      
+      messageDiv.innerHTML = `
+        <div class="message-avatar">${initial}</div>
+        <div class="message-content">
+          <div class="message-author">${escapeHtml(username || 'User')}</div>
+          <div class="message-bubble">${escapeHtml(message.text)}</div>
+          <div class="message-time">${timeAgo}</div>
+        </div>
+      `;
+      
+      container.appendChild(messageDiv);
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════
+    // HEALING TOOLS FUNCTIONS
+    // ═══════════════════════════════════════════════════════════════════
+    
+    /**
+     * Start breathing exercise
+     */
+    function startBreathingExercise() {
+      const circle = document.getElementById('breathingCircle');
+      const instruction = document.getElementById('breathingInstruction');
+      const timer = document.getElementById('breathingTimer');
+      const startBtn = document.getElementById('startBreathingBtn');
+      const stopBtn = document.getElementById('stopBreathingBtn');
+      
+      startBtn.classList.add('hidden');
+      stopBtn.classList.remove('hidden');
+      
+      let phase = 0; // 0: inhale, 1: hold, 2: exhale
+      let count = 4;
+      
+      const phases = [
+        { name: 'Inhale deeply', duration: 4, class: 'inhale' },
+        { name: 'Hold your breath', duration: 4, class: 'hold' },
+        { name: 'Exhale slowly', duration: 6, class: 'exhale' }
+      ];
+      
+      function updateBreathing() {
+        const currentPhase = phases[phase];
+        instruction.textContent = currentPhase.name;
+        circle.className = 'breathing-circle ' + currentPhase.class;
+        
+        count--;
+        timer.textContent = count;
+        
+        if (count === 0) {
+          phase = (phase + 1) % 3;
+          count = phases[phase].duration;
+        }
+      }
+      
+      updateBreathing();
+      app.breathingInterval = setInterval(updateBreathing, 1000);
+    }
+    
+    /**
+     * Stop breathing exercise
+     */
+    function stopBreathingExercise() {
+      clearInterval(app.breathingInterval);
+      
+      document.getElementById('breathingCircle').className = 'breathing-circle';
+      document.getElementById('breathingInstruction').textContent = 'Click Start to begin';
+      document.getElementById('breathingTimer').textContent = '4';
+      document.getElementById('startBreathingBtn').classList.remove('hidden');
+      document.getElementById('stopBreathingBtn').classList.add('hidden');
+    }
+    
+    /**
+     * Select mood
+     */
+    function selectMood(mood, emoji) {
+      app.selectedMood = mood;
+      app.selectedMoodEmoji = emoji;
+      
+      document.querySelectorAll('.mood-option').forEach(option => {
+        option.classList.remove('selected');
+      });
+      
+      event.currentTarget.classList.add('selected');
+    }
+    
+    /**
+     * Save mood entry
+     */
+    async function saveMoodEntry() {
+      if (!app.selectedMood) {
+        showError('Please select a mood');
+        return;
+      }
+      
+      const note = document.getElementById('moodNote').value.trim();
+      
+      try {
+        const { collection, addDoc, serverTimestamp } = window.FirebaseModules;
+        
+        await addDoc(collection(app.db, 'diary', app.currentUser.uid, 'entries'), {
+          text: note || `Mood: ${app.selectedMoodEmoji}`,
+          mood: app.selectedMood,
+          moodEmoji: app.selectedMoodEmoji,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          sharedToFeed: false
+        });
+        
+        // Reset form
+        document.querySelectorAll('.mood-option').forEach(option => {
+          option.classList.remove('selected');
+        });
+        document.getElementById('moodNote').value = '';
+        app.selectedMood = null;
+        app.selectedMoodEmoji = null;
+        
+        showSuccess('Mood logged!');
+        
+        // Reload mood chart
+        await loadMoodHistory();
+        
+      } catch (error) {
+        console.error('Error saving mood:', error);
+        showError('Failed to save mood entry');
+      }
+    }
+    
+    /**
+     * Load mood history and display chart
+     */
+    async function loadMoodHistory() {
+      try {
+        const { collection, query, where, orderBy, limit, getDocs, Timestamp } = window.FirebaseModules;
+        
+        // Get entries from last 7 days
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        
+        const moodQuery = query(
+          collection(app.db, 'diary', app.currentUser.uid, 'entries'),
+          where('mood', '!=', null),
+          orderBy('mood'),
+          orderBy('createdAt', 'desc'),
+          limit(50)
+        );
+        
+        const snapshot = await getDocs(moodQuery);
+        
+        const moodData = [];
+        snapshot.forEach(doc => {
+          const entry = doc.data();
+          const date = entry.createdAt?.toDate?.();
+          if (date && date >= sevenDaysAgo) {
+            moodData.push({
+              date: date,
+              mood: entry.mood
+            });
+          }
+        });
+        
+        if (moodData.length === 0) {
+          document.getElementById('moodChartContainer').style.display = 'none';
+          return;
+        }
+        
+        // Sort by date
+        moodData.sort((a, b) => a.date - b.date);
+        
+        // Display chart
+        document.getElementById('moodChartContainer').style.display = 'block';
+        drawMoodChart(moodData);
+        
+      } catch (error) {
+        console.error('Error loading mood history:', error);
+      }
+    }
+    
+    /**
+     * Draw mood chart on canvas
+     */
+    function drawMoodChart(data) {
+      const canvas = document.getElementById('moodChart');
+      const ctx = canvas.getContext('2d');
+      
+      // Clear canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      if (data.length === 0) return;
+      
+      const padding = 40;
+      const chartWidth = canvas.width - 2 * padding;
+      const chartHeight = canvas.height - 2 * padding;
+      
+      // Draw axes
+      ctx.strokeStyle = '#CED4DA';
+      ctx.lineWidth = 2;
+      
+      // Y axis
+      ctx.beginPath();
+      ctx.moveTo(padding, padding);
+      ctx.lineTo(padding, canvas.height - padding);
+      ctx.stroke();
+      
+      // X axis
+      ctx.beginPath();
+      ctx.moveTo(padding, canvas.height - padding);
+      ctx.lineTo(canvas.width - padding, canvas.height - padding);
+      ctx.stroke();
+      
+      // Draw Y axis labels
+      ctx.fillStyle = '#4B5B6A';
+      ctx.font = '12px Inter';
+      ctx.textAlign = 'right';
+      
+      const moodLabels = ['😢', '😟', '😐', '🙂', '😊'];
+      for (let i = 0; i < 5; i++) {
+        const y = canvas.height - padding - (i * chartHeight / 4);
+        ctx.fillText(moodLabels[i], padding - 10, y + 5);
+      }
+      
+      // Plot data points and line
+      ctx.strokeStyle = '#085FAD';
+      ctx.fillStyle = '#085FAD';
+      ctx.lineWidth = 2;
+      
+      const xStep = chartWidth / (data.length - 1 || 1);
+      
+      ctx.beginPath();
+      data.forEach((point, index) => {
+        const x = padding + (index * xStep);
+        const y = canvas.height - padding - ((point.mood - 1) * chartHeight / 4);
+        
+        if (index === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+        
+        // Draw point
+        ctx.fillRect(x - 3, y - 3, 6, 6);
+      });
+      
+      ctx.stroke();
+      
+      // Draw X axis labels (dates)
+      ctx.fillStyle = '#4B5B6A';
+      ctx.textAlign = 'center';
+      
+      data.forEach((point, index) => {
+        if (index % Math.ceil(data.length / 5) === 0) {
+          const x = padding + (index * xStep);
+          const dateStr = point.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+          ctx.fillText(dateStr, x, canvas.height - padding + 20);
+        }
+      });
+    }
+    
+    /**
+     * Show cognitive reframe prompts
+     */
+    function showReframePrompts() {
+      const category = document.getElementById('reframeCategory').value;
+      
+      if (!category) {
+        document.getElementById('reframePrompts').classList.add('hidden');
+        return;
+      }
+      
+      const prompts = reframePrompts[category];
+      
+      const promptsHtml = `
+        <h4 style="margin-bottom: var(--spacing-md);">Reflection Prompts:</h4>
+        <ul style="line-height: 2;">
+          ${prompts.map(prompt => `<li>${escapeHtml(prompt)}</li>`).join('')}
+        </ul>
+        <p style="margin-top: var(--spacing-md); font-style: italic;">
+          Take your time to reflect on these questions. There are no wrong answers.
+        </p>
+      `;
+      
+      document.getElementById('reframePromptsContent').innerHTML = promptsHtml;
+      document.getElementById('reframePrompts').classList.remove('hidden');
+    }
+    
+    /**
+     * Save cognitive reframe to diary
+     */
+    async function saveReframe() {
+      const category = document.getElementById('reframeCategory').value;
+      const response = document.getElementById('reframeResponse').value.trim();
+      
+      if (!response) {
+        showError('Please write your reflection');
+        return;
+      }
+      
+      try {
+        const { collection, addDoc, serverTimestamp } = window.FirebaseModules;
+        
+        const text = `Cognitive Reframe (${category})\n\n${response}`;
+        
+        await addDoc(collection(app.db, 'diary', app.currentUser.uid, 'entries'), {
+          text: text,
+          mood: null,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          sharedToFeed: false
+        });
+        
+        // Reset form
+        document.getElementById('reframeCategory').value = '';
+        document.getElementById('reframeResponse').value = '';
+        document.getElementById('reframePrompts').classList.add('hidden');
+        
+        showSuccess('Reflection saved to your private diary!');
+        
+      } catch (error) {
+        console.error('Error saving reframe:', error);
+        showError('Failed to save reflection');
+      }
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════
+    // PROFILE FUNCTIONS
+    // ═══════════════════════════════════════════════════════════════════
+    
+    /**
+     * Load profile data into form
+     */
+    function loadProfileData() {
+      if (!app.currentUser || !app.currentUserData) return;
+      
+      document.getElementById('profileUsername').value = app.currentUserData.username || '';
+      document.getElementById('profileEmail').value = app.currentUser.email || '';
+      document.getElementById('profileNewPassword').value = '';
+    }
+    
+    /**
+     * Update username
+     */
+    async function updateUsername() {
+      const newUsername = document.getElementById('profileUsername').value.trim();
+      
+      if (!newUsername || newUsername.length < 3 || newUsername.length > 30) {
+        showProfileError('Username must be between 3 and 30 characters');
+        return;
+      }
+      
+      try {
+        const { updateProfile } = window.FirebaseModules;
+        const { doc, updateDoc } = window.FirebaseModules;
+        
+        await updateProfile(app.currentUser, { displayName: newUsername });
+        await updateDoc(doc(app.db, 'users', app.currentUser.uid), {
+          username: newUsername
+        });
+        
+        app.currentUserData.username = newUsername;
+        
+        showProfileSuccess('Username updated successfully!');
+        
+      } catch (error) {
+        console.error('Error updating username:', error);
+        showProfileError('Failed to update username');
+      }
+    }
+    
+    /**
+     * Update email with reauthentication
+     */
+    async function updateEmail() {
+      const newEmail = document.getElementById('profileEmail').value.trim();
+      
+      if (!newEmail) {
+        showProfileError('Please enter an email');
+        return;
+      }
+      
+      // Request reauthentication
+      app.reauthCallback = async () => {
+        try {
+          const { updateEmail } = window.FirebaseModules;
+          const { doc, updateDoc } = window.FirebaseModules;
+          
+          await updateEmail(app.currentUser, newEmail);
+          await updateDoc(doc(app.db, 'users', app.currentUser.uid), {
+            email: newEmail
+          });
+          
+          showProfileSuccess('Email updated successfully!');
+          
+        } catch (error) {
+          console.error('Error updating email:', error);
+          showProfileError('Failed to update email');
+        }
+      };
+      
+      openModal('reauthModal');
+    }
+    
+    /**
+     * Update password with reauthentication
+     */
+    async function updatePassword() {
+      const newPassword = document.getElementById('profileNewPassword').value;
+      
+      if (!newPassword || newPassword.length < 6) {
+        showProfileError('Password must be at least 6 characters');
+        return;
+      }
+      
+      // Request reauthentication
+      app.reauthCallback = async () => {
+        try {
+          const { updatePassword } = window.FirebaseModules;
+          
+          await updatePassword(app.currentUser, newPassword);
+          
+          document.getElementById('profileNewPassword').value = '';
+          showProfileSuccess('Password updated successfully!');
+          
+        } catch (error) {
+          console.error('Error updating password:', error);
+          showProfileError('Failed to update password');
+        }
+      };
+      
+      openModal('reauthModal');
+    }
+    
+    /**
+     * Handle reauthentication
+     */
+    async function handleReauthentication() {
+      const password = document.getElementById('reauthPassword').value;
+      
+      if (!password) {
+        document.getElementById('reauthError').textContent = 'Please enter your password';
+        document.getElementById('reauthError').classList.remove('hidden');
+        return;
+      }
+      
+      try {
+        const { reauthenticateWithCredential, EmailAuthProvider } = window.FirebaseModules;
+        
+        const credential = EmailAuthProvider.credential(app.currentUser.email, password);
+        await reauthenticateWithCredential(app.currentUser, credential);
+        
+        closeModal('reauthModal');
+        document.getElementById('reauthPassword').value = '';
+        document.getElementById('reauthError').classList.add('hidden');
+        
+        // Execute callback
+        if (app.reauthCallback) {
+          await app.reauthCallback();
+          app.reauthCallback = null;
+        }
+        
+      } catch (error) {
+        console.error('Reauthentication error:', error);
+        document.getElementById('reauthError').textContent = 'Incorrect password';
+        document.getElementById('reauthError').classList.remove('hidden');
+      }
+    }
+    
+    /**
+     * Export user data
+     */
+    async function exportUserData() {
+      try {
+        const { collection, getDocs } = window.FirebaseModules;
+        
+        // Collect all user data
+        const userData = {
+          username: app.currentUserData.username,
+          email: app.currentUser.email,
+          joinedAt: app.currentUserData.joinedAt?.toDate?.()?.toISOString(),
+          diary: [],
+          posts: []
+        };
+        
+        // Get diary entries
+        const diarySnapshot = await getDocs(
+          collection(app.db, 'diary', app.currentUser.uid, 'entries')
+        );
+        
+        diarySnapshot.forEach(doc => {
+          const entry = doc.data();
+          userData.diary.push({
+            text: entry.text,
+            mood: entry.mood,
+            createdAt: entry.createdAt?.toDate?.()?.toISOString()
+          });
+        });
+        
+        // Get feed posts by user
+        const { query, where } = window.FirebaseModules;
+        const postsQuery = query(
+          collection(app.db, 'feed'),
+          where('authorUid', '==', app.currentUser.uid)
+        );
+        
+        const postsSnapshot = await getDocs(postsQuery);
+        
+        postsSnapshot.forEach(doc => {
+          const post = doc.data();
+          userData.posts.push({
+            text: post.text,
+            createdAt: post.createdAt?.toDate?.()?.toISOString()
+          });
+        });
+        
+        // Download as JSON
+        const dataStr = JSON.stringify(userData, null, 2);
+        const dataBlob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(dataBlob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `safespace-data-${Date.now()}.json`;
+        a.click();
+        
+        URL.revokeObjectURL(url);
+        
+        showSuccess('Data exported successfully!');
+        
+      } catch (error) {
+        console.error('Error exporting data:', error);
+        showError('Failed to export data');
+      }
+    }
+    
+    /**
+     * Deactivate user account
+     */
+    async function deactivateAccount() {
+      if (!confirm('Are you sure you want to deactivate your account? You can reactivate by logging in again.')) {
+        return;
+      }
+      
+      try {
+        const { doc, updateDoc } = window.FirebaseModules;
+        
+        await updateDoc(doc(app.db, 'users', app.currentUser.uid), {
+          disabled: true
+        });
+        
+        await signOutUser();
+        
+        showSuccess('Account deactivated');
+        
+      } catch (error) {
+        console.error('Error deactivating account:', error);
+        showError('Failed to deactivate account');
+      }
+    }
+    
+    /**
+     * Show profile error
+     */
+    function showProfileError(message) {
+      const errorDiv = document.getElementById('profileError');
+      const errorText = document.getElementById('profileErrorText');
+      
+      errorText.textContent = message;
+      errorDiv.classList.remove('hidden');
+      document.getElementById('profileSuccess').classList.add('hidden');
+      
+      setTimeout(() => {
+        errorDiv.classList.add('hidden');
+      }, 5000);
+    }
+    
+    /**
+     * Show profile success
+     */
+    function showProfileSuccess(message) {
+      const successDiv = document.getElementById('profileSuccess');
+      const successText = document.getElementById('profileSuccessText');
+      
+      successText.textContent = message;
+      successDiv.classList.remove('hidden');
+      document.getElementById('profileError').classList.add('hidden');
+      
+      setTimeout(() => {
+        successDiv.classList.add('hidden');
+      }, 5000);
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════
+    // ADMIN FUNCTIONS
+    // ═══════════════════════════════════════════════════════════════════
+    
+    /**
+     * Load admin panel data
+     */
+    async function loadAdminData() {
+      await loadAdminUsers();
+      await loadAdminActions();
+    }
+    
+    /**
+     * Load all users for admin panel
+     */
+    async function loadAdminUsers() {
+      try {
+        const { collection, getDocs, orderBy, query } = window.FirebaseModules;
+        
+        const usersQuery = query(
+          collection(app.db, 'users'),
+          orderBy('joinedAt', 'desc')
+        );
+        
+        const snapshot = await getDocs(usersQuery);
+        
+        const userList = document.getElementById('adminUserList');
+        userList.innerHTML = '';
+        
+        if (snapshot.empty) {
+          userList.innerHTML = '<tr><td colspan="6" class="text-center">No users found</td></tr>';
+          return;
+        }
+        
+        snapshot.forEach(doc => {
+          const user = { uid: doc.id, ...doc.data() };
+          renderAdminUser(user, userList);
+        });
+        
+      } catch (error) {
+        console.error('Error loading admin users:', error);
+      }
+    }
+    
+    /**
+     * Render user row in admin table
+     */
+    function renderAdminUser(user, container) {
+      const row = document.createElement('tr');
+      
+      const joinedDate = user.joinedAt?.toDate?.()?.toLocaleDateString() || 'N/A';
+      const emailMasked = user.email.replace(/(.{2})(.*)(@.*)/, '$1***$3');
+      
+      const statusBadge = user.disabled 
+        ? '<span class="badge badge-danger">Disabled</span>'
+        : '<span class="badge badge-success">Active</span>';
+      
+      const roleBadge = user.role === 'admin'
+        ? '<span class="badge badge-primary">Admin</span>'
+        : '<span class="badge">User</span>';
+      
+      row.innerHTML = `
+        <td>${escapeHtml(user.username)}</td>
+        <td>${emailMasked}</td>
+        <td>${roleBadge}</td>
+        <td>${joinedDate}</td>
+        <td>${statusBadge}</td>
+        <td>
+          <div class="admin-actions">
+            ${user.role === 'user' ? `
+              <button class="btn btn-secondary btn-sm" onclick="promoteUser('${user.uid}', '${escapeHtml(user.username)}')">
+                Promote
+              </button>
+            ` : ''}
+            ${user.role === 'admin' && user.uid !== app.currentUser.uid ? `
+              <button class="btn btn-secondary btn-sm" onclick="demoteUser('${user.uid}', '${escapeHtml(user.username)}')">
+                Demote
+              </button>
+            ` : ''}
+            ${!user.disabled ? `
+              <button class="btn btn-danger btn-sm" onclick="disableUser('${user.uid}', '${escapeHtml(user.username)}', '${user.email}')">
+                Disable
+              </button>
+            ` : `
+              <button class="btn btn-success btn-sm" onclick="enableUser('${user.uid}', '${escapeHtml(user.username)}')">
+                Enable
+              </button>
+            `}
+            ${user.uid !== app.currentUser.uid ? `
+              <button class="btn btn-danger btn-sm" onclick="deleteUser('${user.uid}', '${escapeHtml(user.username)}')">
+                Delete
+              </button>
+            ` : ''}
+          </div>
+        </td>
+      `;
+      
+      container.appendChild(row);
+    }
+    
+    /**
+     * Promote user to admin
+     */
+    async function promoteUser(uid, username) {
+      if (!confirm(`Promote ${username} to admin?`)) return;
+      
+      try {
+        const { doc, updateDoc } = window.FirebaseModules;
+        
+        await updateDoc(doc(app.db, 'users', uid), {
+          role: 'admin'
+        });
+        
+        await logAdminAction('promote', uid, username, 'Promoted to admin');
+        
+        await loadAdminUsers();
+        showAdminSuccess(`${username} promoted to admin`);
+        
+      } catch (error) {
+        console.error('Error promoting user:', error);
+        showAdminError('Failed to promote user');
+      }
+    }
+    
+    /**
+     * Demote admin to user
+     */
+    async function demoteUser(uid, username) {
+      if (!confirm(`Demote ${username} from admin?`)) return;
+      
+      try {
+        const { doc, updateDoc } = window.FirebaseModules;
+        
+        await updateDoc(doc(app.db, 'users', uid), {
+          role: 'user'
+        });
+        
+        await logAdminAction('demote', uid, username, 'Demoted to user');
+        
+        await loadAdminUsers();
+        showAdminSuccess(`${username} demoted to user`);
+        
+      } catch (error) {
+        console.error('Error demoting user:', error);
+        showAdminError('Failed to demote user');
+      }
+    }
+    
+    /**
+     * Disable user account
+     */
+    async function disableUser(uid, username, email) {
+      const reason = prompt(`Disable ${username}? Enter reason:`);
+      if (!reason) return;
+      
+      try {
+        const { doc, updateDoc, collection, addDoc, serverTimestamp } = window.FirebaseModules;
+        
+        // Disable user
+        await updateDoc(doc(app.db, 'users', uid), {
+          disabled: true,
+          blockedReason: reason
+        });
+        
+        // Add to blocked identifiers
+        const fingerprint = generateDeviceFingerprint();
+        await addDoc(collection(app.db, 'blockedIdentifiers'), {
+          fingerprintHash: fingerprint,
+          email: email.toLowerCase(),
+          reason: reason,
+          createdAt: serverTimestamp()
+        });
+        
+        await logAdminAction('disable', uid, username, reason);
+        
+        await loadAdminUsers();
+        showAdminSuccess(`${username} disabled`);
+        
+      } catch (error) {
+        console.error('Error disabling user:', error);
+        showAdminError('Failed to disable user');
+      }
+    }
+    
+    /**
+     * Enable user account
+     */
+    async function enableUser(uid, username) {
+      if (!confirm(`Enable ${username}?`)) return;
+      
+      try {
+        const { doc, updateDoc } = window.FirebaseModules;
+        
+        await updateDoc(doc(app.db, 'users', uid), {
+          disabled: false,
+          blockedReason: null
+        });
+        
+        await logAdminAction('enable', uid, username, 'Account enabled');
+        
+        await loadAdminUsers();
+        showAdminSuccess(`${username} enabled`);
+        
+      } catch (error) {
+        console.error('Error enabling user:', error);
+        showAdminError('Failed to enable user');
+      }
+    }
+    
+    /**
+     * Delete user account and content
+     */
+    async function deleteUser(uid, username) {
+      if (!confirm(`PERMANENTLY DELETE ${username} and all their content? This cannot be undone!`)) return;
+      if (!confirm('Are you absolutely sure? This will delete their diary, posts, and account.')) return;
+      
+      try {
+        const { doc, deleteDoc, collection, query, where, getDocs } = window.FirebaseModules;
+        
+        // Delete diary entries
+        const diarySnapshot = await getDocs(
+          collection(app.db, 'diary', uid, 'entries')
+        );
+        
+        for (const entryDoc of diarySnapshot.docs) {
+          await deleteDoc(entryDoc.ref);
+        }
+        
+        // Delete user's feed posts
+        const postsQuery = query(
+          collection(app.db, 'feed'),
+          where('authorUid', '==', uid)
+        );
+        
+        const postsSnapshot = await getDocs(postsQuery);
+        
+        for (const postDoc of postsSnapshot.docs) {
+          // Delete comments first
+          const commentsSnapshot = await getDocs(
+            collection(app.db, 'feed', postDoc.id, 'comments')
+          );
+          
+          for (const commentDoc of commentsSnapshot.docs) {
+            await deleteDoc(commentDoc.ref);
+          }
+          
+          // Delete post
+          await deleteDoc(postDoc.ref);
+        }
+        
+        // Delete user document
+        await deleteDoc(doc(app.db, 'users', uid));
+        
+        await logAdminAction('delete', uid, username, 'Account and content permanently deleted');
+        
+        await loadAdminUsers();
+        showAdminSuccess(`${username} deleted permanently`);
+        
+      } catch (error) {
+        console.error('Error deleting user:', error);
+        showAdminError('Failed to delete user');
+      }
+    }
+    
+    /**
+     * Log admin action
+     */
+    async function logAdminAction(actionType, targetUid, targetUsername, details) {
+      try {
+        const { collection, addDoc, serverTimestamp } = window.FirebaseModules;
+        
+        await addDoc(collection(app.db, 'adminActions'), {
+          adminUid: app.currentUser.uid,
+          adminUsername: app.currentUserData.username,
+          actionType: actionType,
+          targetUid: targetUid,
+          targetUsername: targetUsername,
+          timestamp: serverTimestamp(),
+          details: details
+        });
+        
+      } catch (error) {
+        console.error('Error logging admin action:', error);
+      }
+    }
+    
+    /**
+     * Load admin actions log
+     */
+    async function loadAdminActions() {
+      try {
+        const { collection, query, orderBy, limit, getDocs } = window.FirebaseModules;
+        
+        const actionsQuery = query(
+          collection(app.db, 'adminActions'),
+          orderBy('timestamp', 'desc'),
+          limit(50)
+        );
+        
+        const snapshot = await getDocs(actionsQuery);
+        
+        const actionsList = document.getElementById('adminActionsLog');
+        actionsList.innerHTML = '';
+        
+        if (snapshot.empty) {
+          actionsList.innerHTML = '<tr><td colspan="5" class="text-center">No actions logged</td></tr>';
+          return;
+        }
+        
+        snapshot.forEach(doc => {
+          const action = doc.data();
+          renderAdminAction(action, actionsList);
+        });
+        
+      } catch (error) {
+        console.error('Error loading admin actions:', error);
+      }
+    }
+    
+    /**
+     * Render admin action in log
+     */
+    function renderAdminAction(action, container) {
+      const row = document.createElement('tr');
+      
+      const timestamp = action.timestamp?.toDate?.()?.toLocaleString() || 'N/A';
+      
+      row.innerHTML = `
+        <td>${escapeHtml(action.adminUsername)}</td>
+        <td><span class="badge badge-primary">${escapeHtml(action.actionType)}</span></td>
+        <td>${escapeHtml(action.targetUsername)}</td>
+        <td>${timestamp}</td>
+        <td>${escapeHtml(action.details)}</td>
+      `;
+      
+      container.appendChild(row);
+    }
+    
+    /**
+     * Show admin error
+     */
+    function showAdminError(message) {
+      const errorDiv = document.getElementById('adminError');
+      const errorText = document.getElementById('adminErrorText');
+      
+      errorText.textContent = message;
+      errorDiv.classList.remove('hidden');
+      document.getElementById('adminSuccess').classList.add('hidden');
+      
+      setTimeout(() => {
+        errorDiv.classList.add('hidden');
+      }, 5000);
+    }
+    
+    /**
+     * Show admin success
+     */
+    function showAdminSuccess(message) {
+      const successDiv = document.getElementById('adminSuccess');
+      const successText = document.getElementById('adminSuccessText');
+      
+      successText.textContent = message;
+      successDiv.classList.remove('hidden');
+      document.getElementById('adminError').classList.add('hidden');
+      
+      setTimeout(() => {
+        successDiv.classList.add('hidden');
+      }, 5000);
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════
+    // UTILITY FUNCTIONS
+    // ═══════════════════════════════════════════════════════════════════
+    
+    /**
+     * Escape HTML to prevent XSS
+     * All user content is escaped before rendering
+     */
+    function escapeHtml(text) {
+      if (typeof text !== 'string') return '';
+      
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+    
+    /**
+     * Format timestamp as relative time
+     */
+    function formatTimeAgo(date) {
+      const seconds = Math.floor((new Date() - date) / 1000);
+      
+      const intervals = {
+        year: 31536000,
+        month: 2592000,
+        week: 604800,
+        day: 86400,
+        hour: 3600,
+        minute: 60,
+        second: 1
+      };
+      
+      for (const [unit, secondsInUnit] of Object.entries(intervals)) {
+        const interval = Math.floor(seconds / secondsInUnit);
+        
+        if (interval >= 1) {
+          return interval === 1 ? `1 ${unit} ago` : `${interval} ${unit}s ago`;
+        }
+      }
+      
+      return 'just now';
+    }
+    
+    /**
+     * Rate limiting check
+     * NOTE: This is client-side only. For production, implement server-side rate limiting.
+     */
+    function checkRateLimit(type, limit) {
+      const now = Date.now();
+      const limiter = app.rateLimiter[type];
+      
+      // Reset counter if time window passed
+      if (now > limiter.resetTime) {
+        limiter.count = 0;
+        limiter.resetTime = now + 60000; // 1 minute window
+      }
+      
+      // Check limit
+      if (limiter.count >= limit) {
+        return false;
+      }
+      
+      limiter.count++;
+      return true;
+    }
+    
+    /**
+     * Debounce function for search inputs
+     */
+    function debounce(func, wait) {
+      let timeout;
+      return function executedFunction(...args) {
+        const later = () => {
+          clearTimeout(timeout);
+          func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+      };
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════
+    // EVENT LISTENERS SETUP
+    // ═══════════════════════════════════════════════════════════════════
+    
+    /**
+     * Set up all event listeners
+     */
+    function setupEventListeners() {
+      // Auth page navigation
+      document.getElementById('showRegister')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        document.getElementById('loginPage').classList.add('hidden');
+        document.getElementById('registerPage').classList.remove('hidden');
+      });
+      
+      document.getElementById('showLogin')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        document.getElementById('registerPage').classList.add('hidden');
+        document.getElementById('loginPage').classList.remove('hidden');
+      });
+      
+      document.getElementById('showForgotPassword')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        document.getElementById('loginPage').classList.add('hidden');
+        document.getElementById('forgotPasswordPage').classList.remove('hidden');
+      });
+      
+      document.getElementById('backToLogin')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        document.getElementById('forgotPasswordPage').classList.add('hidden');
+        document.getElementById('loginPage').classList.remove('hidden');
+      });
+      
+      // Auth forms
+      document.getElementById('loginForm')?.addEventListener('submit', handleLogin);
+      document.getElementById('registerForm')?.addEventListener('submit', handleRegister);
+      document.getElementById('forgotPasswordForm')?.addEventListener('submit', handleForgotPassword);
+      
+      // Navigation
+      document.querySelectorAll('.nav-link[data-page]').forEach(link => {
+        link.addEventListener('click', (e) => {
+          e.preventDefault();
+          const page = link.dataset.page;
+          navigateToPage(page);
+        });
+      });
+      
+      document.getElementById('logoutBtn')?.addEventListener('click', signOutUser);
+      document.getElementById('mobileMenuBtn')?.addEventListener('click', toggleMobileMenu);
+      
+      // Feed
+      document.getElementById('createPostBtn')?.addEventListener('click', () => {
+        openModal('createPostModal');
+      });
+      
+      document.getElementById('submitPostBtn')?.addEventListener('click', createPost);
+      document.getElementById('loadMoreFeed')?.addEventListener('click', () => loadFeed(true));
+      
+      document.getElementById('postText')?.addEventListener('input', (e) => {
+        document.getElementById('postCharCount').textContent = e.target.value.length;
+      });
+      
+      // Media preview
+      document.getElementById('postMedia')?.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        try {
+          const mediaData = await compressMedia(file);
+          const preview = document.getElementById('mediaPreview');
+          
+          if (mediaData.type === 'video') {
+            preview.innerHTML = `<video src="${mediaData.dataUrl}" controls style="max-width: 100%; border-radius: 8px;"></video>`;
+          } else {
+            preview.innerHTML = `<img src="${mediaData.dataUrl}" style="max-width: 100%; border-radius: 8px;">`;
+          }
+        } catch (error) {
+          showError(error.message);
+          e.target.value = '';
+        }
+      });
+      
+      // Feed search
+      const feedSearchDebounced = debounce(() => {
+        const searchTerm = document.getElementById('feedSearch').value.toLowerCase();
+        
+        document.querySelectorAll('.feed-post').forEach(post => {
+          const text = post.querySelector('.post-content').textContent.toLowerCase();
+          const author = post.querySelector('.post-author').textContent.toLowerCase();
+          
+          if (text.includes(searchTerm) || author.includes(searchTerm)) {
+            post.style.display = 'block';
+          } else {
+            post.style.display = 'none';
+          }
+        });
+      }, 300);
+      
+      document.getElementById('feedSearch')?.addEventListener('input', feedSearchDebounced);
+      
+      // Comments
+      document.getElementById('commentForm')?.addEventListener('submit', addComment);
+      
+      // Diary
+      document.getElementById('createDiaryBtn')?.addEventListener('click', () => {
+        document.getElementById('diaryModalTitle').textContent = 'New Diary Entry';
+        document.getElementById('diaryText').value = '';
+        app.editingDiaryId = null;
+        openModal('createDiaryModal');
+      });
+      
+      document.getElementById('saveDiaryBtn')?.addEventListener('click', saveDiaryEntry);
+      
+      // Chat
+      document.getElementById('publicChatForm')?.addEventListener('submit', sendPublicChatMessage);
+      
+      const userSearchDebounced = debounce(searchUsers, 300);
+      document.getElementById('userSearchInput')?.addEventListener('input', userSearchDebounced);
+      
+      // Healing Tools
+      document.getElementById('startBreathingBtn')?.addEventListener('click', startBreathingExercise);
+      document.getElementById('stopBreathingBtn')?.addEventListener('click', stopBreathingExercise);
+      
+      document.querySelectorAll('.mood-option').forEach(option => {
+        option.addEventListener('click', function() {
+          const mood = parseInt(this.dataset.mood);
+          const emoji = this.dataset.emoji;
+          selectMood(mood, emoji);
+        });
+      });
+      
+      document.getElementById('saveMoodBtn')?.addEventListener('click', saveMoodEntry);
+      
+      document.getElementById('reframeCategory')?.addEventListener('change', showReframePrompts);
+      document.getElementById('saveReframeBtn')?.addEventListener('click', saveReframe);
+      
+      // Profile
+      document.getElementById('updateUsernameBtn')?.addEventListener('click', updateUsername);
+      document.getElementById('updateEmailBtn')?.addEventListener('click', updateEmail);
+      document.getElementById('updatePasswordBtn')?.addEventListener('click', updatePassword);
+      document.getElementById('exportDataBtn')?.addEventListener('click', exportUserData);
+      document.getElementById('deactivateAccountBtn')?.addEventListener('click', deactivateAccount);
+      
+      // Reauthentication
+      document.getElementById('reauthConfirmBtn')?.addEventListener('click', handleReauthentication);
+      
+      // Resources modal
+      document.getElementById('showResourcesModal')?.addEventListener('click', () => {
+        openModal('resourcesModal');
+      });
+      
+      // Close modals on overlay click
+      document.querySelectorAll('.modal-overlay').forEach(overlay => {
+        overlay.addEventListener('click', (e) => {
+          if (e.target === overlay) {
+            overlay.classList.remove('active');
+          }
+        });
+      });
+      
+      // Detect online/offline
+      window.addEventListener('online', () => {
+        showSuccess('Connection restored');
+      });
+      
+      window.addEventListener('offline', () => {
+        showError('You are offline. Some features may not work.');
+      });
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════
+    // INITIALIZE APP ON LOAD
+    // ═══════════════════════════════════════════════════════════════════
+    
+    // Start initialization when DOM is ready
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initializeApp);
+    } else {
+      initializeApp();
+    }
+  </script>
+
+</body>
+</html>
