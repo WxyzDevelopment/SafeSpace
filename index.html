@@ -1690,6 +1690,80 @@
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
     }
+
+    .chat-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--gray-600);
+  margin: 8px 0;
+  padding-left: 10px;
+  text-transform: uppercase;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   FIX: Mobile Sidebar & Layout for Safespace
+   ═══════════════════════════════════════════════════════════════════ */
+@media (max-width: 768px) {
+  .app-container {
+    flex-direction: column;
+  }
+
+  /* Sidebar hidden by default */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    transform: translateX(-100%);
+    width: 260px;
+    transition: transform 0.3s ease;
+    z-index: 1000;
+  }
+
+  /* Sidebar opens when toggled */
+  .sidebar.visible {
+    transform: translateX(0);
+  }
+
+  /* Overlay behind sidebar */
+  .sidebar-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.4);
+    backdrop-filter: blur(3px);
+    z-index: 999;
+    display: none;
+  }
+
+  .sidebar.visible + .sidebar-backdrop {
+    display: block;
+  }
+
+  /* Main content should fill full width */
+  .main-content {
+    margin-left: 0 !important;
+    padding: var(--spacing-md);
+  }
+
+  /* Mobile header always visible */
+  .mobile-header {
+    display: flex;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 998;
+  }
+
+  /* Prevent overflow issues */
+  body.menu-open {
+    overflow: hidden;
+  }
+}
+
   </style>
 </head>
 <body>
@@ -1873,12 +1947,12 @@
             <span>Private Diary</span>
           </a>
         </li>
-        <li class="nav-item">
+        <!-- <li class="nav-item">
           <a class="nav-link" data-page="publicChat">
             <span class="material-icons">forum</span>
             <span>Public Chat</span>
           </a>
-        </li>
+        </li> -->
         <li class="nav-item">
           <a class="nav-link" data-page="privateChat">
             <span class="material-icons">chat</span>
@@ -3824,64 +3898,97 @@
     }
     
     /**
-     * Load private chat threads
-     */
-    async function loadPrivateChats() {
-      try {
-        const { collection, query, where, orderBy, getDocs } = window.FirebaseModules;
-        
-        const chatsQuery = query(
-          collection(app.db, 'chats'),
-          where('participants', 'array-contains', app.currentUser.uid),
-          orderBy('lastUpdated', 'desc')
-        );
-        
-        const snapshot = await getDocs(chatsQuery);
-        
-        const chatList = document.getElementById('privateChatList');
-        chatList.innerHTML = '';
-        
-        if (snapshot.empty) {
-          chatList.innerHTML = '<div class="empty-state"><p>No conversations yet</p></div>';
-          return;
-        }
-        
-        snapshot.forEach(doc => {
-          const chat = { id: doc.id, ...doc.data() };
-          renderChatThread(chat, chatList);
-        });
-        
-      } catch (error) {
-        console.error('Error loading private chats:', error);
+ * Load private chat threads (with real-time updates)
+ */
+function loadPrivateChats() {
+  try {
+    const { collection, query, where, orderBy, onSnapshot } = window.FirebaseModules;
+    
+    const chatsQuery = query(
+      collection(app.db, 'chats'),
+      where('participants', 'array-contains', app.currentUser.uid),
+      orderBy('lastUpdated', 'desc')
+    );
+    
+    const chatList = document.getElementById('privateChatList');
+    chatList.innerHTML = `<h4 class="chat-section-title">Your Conversations</h4>`;
+
+    // Real-time listener for chats
+    onSnapshot(chatsQuery, (snapshot) => {
+      chatList.innerHTML = `<h4 class="chat-section-title">Your Conversations</h4>`;
+      
+      if (snapshot.empty) {
+        chatList.innerHTML += '<div class="empty-state"><p>No conversations yet</p></div>';
+        return;
       }
-    }
+
+      snapshot.forEach(doc => {
+        const chat = { id: doc.id, ...doc.data() };
+        renderChatThread(chat, chatList);
+      });
+    });
+
+  } catch (error) {
+    console.error('Error loading private chats:', error);
+  }
+}
+
     
     /**
-     * Render chat thread in sidebar
-     */
-    function renderChatThread(chat, container) {
-      const chatDiv = document.createElement('div');
-      chatDiv.className = 'chat-item';
-      chatDiv.dataset.chatId = chat.id;
-      
-      const otherUid = chat.participants.find(uid => uid !== app.currentUser.uid);
-      const otherUsername = chat.participantNames?.[otherUid] || 'User';
-      
-      const lastUpdated = chat.lastUpdated?.toDate?.() || new Date();
-      const timeAgo = formatTimeAgo(lastUpdated);
-      
-      chatDiv.innerHTML = `
-        <div class="chat-item-header">
-          <div class="chat-item-name">${escapeHtml(otherUsername)}</div>
-          <div class="chat-item-time">${timeAgo}</div>
-        </div>
-        <div class="chat-item-preview">${escapeHtml(chat.lastMessage || 'No messages yet')}</div>
-      `;
-      
-      chatDiv.onclick = () => openPrivateChat(chat.id, otherUid, otherUsername);
-      
-      container.appendChild(chatDiv);
-    }
+ * Render chat thread in sidebar (with active and unread support)
+ */
+function renderChatThread(chat, container) {
+  const chatDiv = document.createElement('div');
+  chatDiv.className = 'chat-item';
+  chatDiv.dataset.chatId = chat.id;
+
+  const otherUid = chat.participants.find(uid => uid !== app.currentUser.uid);
+  const otherUsername = chat.participantNames?.[otherUid] || 'User';
+
+  const lastUpdated = chat.lastUpdated?.toDate?.() || new Date();
+  const timeAgo = formatTimeAgo(lastUpdated);
+
+  const lastMessage = chat.lastMessage || 'No messages yet';
+  const isUnread = chat.lastSenderUid && chat.lastSenderUid !== app.currentUser.uid && !chat.readBy?.includes(app.currentUser.uid);
+  
+  chatDiv.innerHTML = `
+    <div class="chat-item-header">
+      <div class="chat-item-name">${escapeHtml(otherUsername)}</div>
+      <div class="chat-item-time">${timeAgo}</div>
+    </div>
+    <div class="chat-item-preview">
+      ${isUnread ? '<span class="unread-dot"></span>' : ''}
+      ${escapeHtml(lastMessage)}
+    </div>
+  `;
+
+  chatDiv.onclick = () => {
+    document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
+    chatDiv.classList.add('active');
+    openPrivateChat(chat.id, otherUid, otherUsername);
+
+    // Mark as read
+    markChatAsRead(chat.id);
+  };
+
+  container.appendChild(chatDiv);
+}
+
+/**
+ * Mark chat as read for current user
+ */
+async function markChatAsRead(chatId) {
+  try {
+    const { doc, updateDoc, arrayUnion } = window.FirebaseModules;
+    await updateDoc(doc(app.db, 'chats', chatId), {
+      readBy: arrayUnion(app.currentUser.uid)
+    });
+  } catch (error) {
+    console.warn('Failed to mark chat as read:', error);
+  }
+}
+
+
     
     /**
      * Search for users to start private chat
@@ -5319,6 +5426,18 @@
       window.addEventListener('offline', () => {
         showError('You are offline. Some features may not work.');
       });
+
+      document.addEventListener('DOMContentLoaded', () => {
+    const menuBtn = document.querySelector('.mobile-menu-btn');
+    const sidebar = document.querySelector('.sidebar');
+    const body = document.body;
+
+    menuBtn?.addEventListener('click', () => {
+      sidebar.classList.toggle('visible');
+      body.classList.toggle('menu-open');
+    });
+  });
+  
     }
     
     // ═══════════════════════════════════════════════════════════════════
