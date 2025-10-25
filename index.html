@@ -2,264 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Safespace - Your Safe Mental Health Community</title>
-  
-  <!-- 
-    ═══════════════════════════════════════════════════════════════════════════
-    SAFESPACE - Single-File Mental Health Support Web App
-    ═══════════════════════════════════════════════════════════════════════════
-    
-    A complete, production-ready mental health support platform built as a 
-    single HTML file using Firebase (Auth + Firestore).
-    
-    ═══════════════════════════════════════════════════════════════════════════
-    SETUP INSTRUCTIONS
-    ═══════════════════════════════════════════════════════════════════════════
-    
-    1. Firebase Console Setup:
-       - Go to https://console.firebase.google.com
-       - Select the project: safespace-d741b
-       - Enable Authentication > Email/Password provider
-       - Enable Firestore Database (Start in production mode, we'll add rules)
-       
-    2. Deploy this file:
-       - Save as index.html
-       - Deploy to Firebase Hosting, GitHub Pages, or any static host
-       - Or simply open locally (file://) for testing
-       
-    3. Create first admin user:
-       - Register normally through the app
-       - Go to Firestore console > users collection > your document
-       - Change "role" field from "user" to "admin"
-       - Refresh the app to see Admin Panel appear
-       
-    4. Apply Firestore Security Rules (paste in Firestore Rules tab):
-    
-    rules_version = '2';
-    service cloud.firestore {
-      match /databases/{database}/documents {
-        
-        // Helper functions
-        function isAuthenticated() {
-          return request.auth != null;
-        }
-        
-        function isAdmin() {
-          return isAuthenticated() && 
-                 get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
-        }
-        
-        function isNotDisabled() {
-          return isAuthenticated() && 
-                 get(/databases/$(database)/documents/users/$(request.auth.uid)).data.disabled != true;
-        }
-        
-        // Users collection
-        match /users/{userId} {
-          allow read: if isAuthenticated();
-          allow create: if isAuthenticated() && request.auth.uid == userId;
-          allow update: if isAuthenticated() && 
-                          (request.auth.uid == userId || isAdmin());
-          allow delete: if isAdmin();
-        }
-        
-        // Feed posts
-        match /feed/{postId} {
-          allow read: if isAuthenticated() && isNotDisabled();
-          allow create: if isAuthenticated() && isNotDisabled();
-          allow update, delete: if isAuthenticated() && 
-                                  (resource.data.authorUid == request.auth.uid || isAdmin());
-          
-          // Comments subcollection
-          match /comments/{commentId} {
-            allow read: if isAuthenticated() && isNotDisabled();
-            allow create: if isAuthenticated() && isNotDisabled();
-            allow update, delete: if isAuthenticated() && 
-                                    (resource.data.authorUid == request.auth.uid || isAdmin());
-          }
-        }
-        
-        // Private diary - only owner can access
-        match /diary/{userId}/entries/{entryId} {
-          allow read, write: if isAuthenticated() && request.auth.uid == userId;
-        }
-        
-        // Public chat
-        match /publicChat/messages/{messageId} {
-          allow read: if isAuthenticated() && isNotDisabled();
-          allow create: if isAuthenticated() && isNotDisabled();
-          allow delete: if isAdmin();
-        }
-        
-        // Private chats
-        match /chats/{threadId} {
-          allow read, write: if isAuthenticated() && 
-                               isNotDisabled() &&
-                               request.auth.uid in resource.data.participants;
-          
-          match /messages/{messageId} {
-            allow read: if isAuthenticated() && 
-                         isNotDisabled() &&
-                         request.auth.uid in get(/databases/$(database)/documents/chats/$(threadId)).data.participants;
-            allow create: if isAuthenticated() && 
-                           isNotDisabled() &&
-                           request.auth.uid in get(/databases/$(database)/documents/chats/$(threadId)).data.participants;
-          }
-        }
-        
-        // Admin actions log
-        match /adminActions/{actionId} {
-          allow read: if isAdmin();
-          allow create: if isAdmin();
-        }
-        
-        // Blocked identifiers
-        match /blockedIdentifiers/{id} {
-          allow read: if true; // Allow read for checking during registration
-          allow write: if isAdmin();
-        }
-      }
-    }
-    
-    ═══════════════════════════════════════════════════════════════════════════
-    FIRESTORE DATA MODEL
-    ═══════════════════════════════════════════════════════════════════════════
-    
-    users/{uid}
-      - username: string (pseudonym)
-      - email: string
-      - role: "user" | "admin"
-      - joinedAt: timestamp
-      - disabled: boolean (default false)
-      - deviceFingerprint: string (browser fingerprint hash)
-      - blockedReason: string (optional)
-    
-    feed/{postId}
-      - authorUid: string | null (null for anonymous posts)
-      - authorUsername: string | null
-      - text: string
-      - mediaDataUrl: string (optional, base64 compressed image/video)
-      - mediaType: "image" | "video" (optional)
-      - createdAt: timestamp
-      - likes: { [uid]: true }
-      - commentsCount: number
-      - repostsCount: number
-      - isAnonymous: boolean
-    
-    feed/{postId}/comments/{commentId}
-      - authorUid: string
-      - authorUsername: string
-      - text: string
-      - createdAt: timestamp
-    
-    diary/{uid}/entries/{entryId}
-      - text: string
-      - mood: number (1-5 scale)
-      - moodEmoji: string
-      - createdAt: timestamp
-      - updatedAt: timestamp
-      - sharedToFeed: boolean
-    
-    chats/{threadId}
-      - participants: [uid1, uid2]
-      - participantNames: { uid1: username1, uid2: username2 }
-      - lastMessage: string
-      - lastUpdated: timestamp
-    
-    chats/{threadId}/messages/{messageId}
-      - senderUid: string
-      - senderUsername: string
-      - text: string
-      - createdAt: timestamp
-    
-    publicChat/messages/{messageId}
-      - senderUid: string
-      - username: string
-      - text: string
-      - createdAt: timestamp
-    
-    adminActions/{actionId}
-      - adminUid: string
-      - adminUsername: string
-      - actionType: "disable" | "enable" | "promote" | "demote" | "delete"
-      - targetUid: string
-      - targetUsername: string
-      - timestamp: timestamp
-      - details: string
-    
-    blockedIdentifiers/{id}
-      - fingerprintHash: string
-      - email: string (original blocked email)
-      - reason: string
-      - createdAt: timestamp
-    
-    ═══════════════════════════════════════════════════════════════════════════
-    IMPORTANT SECURITY & PRIVACY NOTES
-    ═══════════════════════════════════════════════════════════════════════════
-    
-    1. MEDIA STORAGE:
-       - This app stores images/videos as base64 data URLs in Firestore
-       - This is NOT recommended for production due to:
-         * Firestore document size limits (1MB per document)
-         * Increased bandwidth costs
-         * Slower query performance
-       - For production: Use Firebase Storage or external CDN
-       - Current implementation: Images compressed to ~500KB, videos limited to 2MB
-    
-    2. RE-REGISTRATION PREVENTION:
-       - Client-only ban enforcement has limitations:
-         * Users can bypass with new browser/device/email
-         * Device fingerprinting is not 100% reliable
-         * No IP logging in pure client-side app
-       - Current implementation: Browser fingerprint + blocked email list
-       - For production: Implement server-side ban checking with:
-         * IP address logging and blocking
-         * Phone verification
-         * reCAPTCHA or similar
-         * Firebase Cloud Functions for server-side validation
-    
-    3. XSS PREVENTION:
-       - All user content is escaped using textContent (not innerHTML)
-       - URLs in posts are not auto-linked to prevent javascript: protocol
-       - For production: Consider additional sanitization library
-    
-    4. PRIVACY:
-       - Anonymous posts have authorUid set to null
-       - Private diary is protected by Firestore rules
-       - No real names required - encourage pseudonyms
-       - For production: Consider end-to-end encryption for private content
-    
-    5. CRISIS RESOURCES:
-       - App includes crisis hotline information
-       - This is NOT a substitute for professional mental health care
-       - Users in crisis should contact emergency services immediately
-    
-    ═══════════════════════════════════════════════════════════════════════════
-    TESTING CHECKLIST
-    ═══════════════════════════════════════════════════════════════════════════
-    
-    [ ] Registration with username validation
-    [ ] Login and logout
-    [ ] Password reset email
-    [ ] Create feed post with and without media
-    [ ] Like, comment, and repost on feed
-    [ ] Create private diary entry
-    [ ] Share diary entry anonymously to feed
-    [ ] Edit and delete diary entries
-    [ ] Public chat - send and receive messages
-    [ ] Private chat - search user and start conversation
-    [ ] Breathing exercise animation
-    [ ] Mood tracker with chart visualization
-    [ ] Cognitive reframe prompt generator
-    [ ] Profile update (username, email, password)
-    [ ] Admin panel - view users, promote/demote, disable/enable
-    [ ] Disabled user blocked from login
-    [ ] Blocked device fingerprint prevents re-registration
-    [ ] Responsive design on mobile and desktop
-    [ ] Offline detection and cached feed display
-    
-  -->
+  <link rel="icon" type="image/png" href="images/favicon.png">
   
   <!-- Firebase SDK v9 (modular) -->
   <script type="module">
@@ -337,7 +82,7 @@
   
   <!-- Google Material Icons -->
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   
   <style>
     /* ═══════════════════════════════════════════════════════════════════
@@ -351,27 +96,28 @@
     }
     
     :root {
-      /* Safespace Blue Color Palette */
-      --primary-blue: #085FAD;
-      --primary-blue-dark: #064577;
-      --primary-blue-light: #0B82D1;
-      --background-light: #D9EAF8;
-      --background-lighter: #EFF6FC;
-      --text-muted: #4B5B6A;
-      --text-dark: #1A2633;
-      --success: #2BB673;
-      --danger: #E04B5A;
-      --warning: #F0AD4E;
+      /* Modern Safespace Blue Color Palette */
+      --primary-blue: #0066CC;
+      --primary-blue-dark: #004C99;
+      --primary-blue-light: #3399FF;
+      --background-light: #E8F4FF;
+      --background-lighter: #F5FAFF;
+      --text-muted: #6B7280;
+      --text-dark: #111827;
+      --success: #10B981;
+      --danger: #EF4444;
+      --warning: #F59E0B;
       --white: #FFFFFF;
-      --gray-100: #F8F9FA;
-      --gray-200: #E9ECEF;
-      --gray-300: #DEE2E6;
-      --gray-400: #CED4DA;
-      --gray-500: #ADB5BD;
-      --gray-600: #6C757D;
-      --gray-700: #495057;
-      --gray-800: #343A40;
-      --gray-900: #212529;
+      --gray-50: #F9FAFB;
+      --gray-100: #F3F4F6;
+      --gray-200: #E5E7EB;
+      --gray-300: #D1D5DB;
+      --gray-400: #9CA3AF;
+      --gray-500: #6B7280;
+      --gray-600: #4B5563;
+      --gray-700: #374151;
+      --gray-800: #1F2937;
+      --gray-900: #111827;
       
       /* Spacing */
       --spacing-xs: 0.25rem;
@@ -392,7 +138,7 @@
       --font-size-3xl: 2rem;
       
       /* Borders */
-      --border-radius-sm: 0.25rem;
+      --border-radius-sm: 0.375rem;
       --border-radius-md: 0.5rem;
       --border-radius-lg: 0.75rem;
       --border-radius-xl: 1rem;
@@ -417,6 +163,12 @@
       color: var(--text-dark);
       background: var(--background-lighter);
       overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    
+    body.menu-open {
+      overflow: hidden;
     }
     
     /* ═══════════════════════════════════════════════════════════════════
@@ -443,10 +195,6 @@
       transition: transform var(--transition-base);
     }
     
-    .sidebar.hidden {
-      transform: translateX(-100%);
-    }
-    
     .sidebar-header {
       display: flex;
       align-items: center;
@@ -457,22 +205,29 @@
     }
     
     .logo {
-      width: 40px;
-      height: 40px;
-      background: linear-gradient(135deg, var(--primary-blue) 0%, var(--primary-blue-light) 100%);
+      width: 48px;
+      height: 48px;
       border-radius: var(--border-radius-lg);
       display: flex;
       align-items: center;
       justify-content: center;
-      color: var(--white);
-      font-weight: 700;
-      font-size: var(--font-size-xl);
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    
+    .logo img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
     }
     
     .logo-text {
       font-size: var(--font-size-xl);
-      font-weight: 700;
-      color: var(--primary-blue);
+      font-weight: 800;
+      background: linear-gradient(135deg, var(--primary-blue) 0%, var(--primary-blue-light) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
     }
     
     .nav-menu {
@@ -480,7 +235,7 @@
     }
     
     .nav-item {
-      margin-bottom: var(--spacing-sm);
+      margin-bottom: var(--spacing-xs);
     }
     
     .nav-link {
@@ -488,7 +243,7 @@
       align-items: center;
       gap: var(--spacing-md);
       padding: var(--spacing-md) var(--spacing-lg);
-      border-radius: var(--border-radius-md);
+      border-radius: var(--border-radius-lg);
       color: var(--text-muted);
       text-decoration: none;
       font-weight: 500;
@@ -504,6 +259,7 @@
     .nav-link.active {
       background: var(--background-light);
       color: var(--primary-blue);
+      font-weight: 600;
     }
     
     .nav-link .material-icons {
@@ -530,6 +286,7 @@
       z-index: 99;
       align-items: center;
       justify-content: space-between;
+      box-shadow: var(--shadow-sm);
     }
     
     .mobile-menu-btn {
@@ -538,6 +295,20 @@
       color: var(--text-dark);
       cursor: pointer;
       padding: var(--spacing-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .mobile-logo {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+    }
+    
+    .mobile-logo .logo {
+      width: 36px;
+      height: 36px;
     }
     
     /* ═══════════════════════════════════════════════════════════════════
@@ -549,15 +320,16 @@
       align-items: center;
       justify-content: center;
       gap: var(--spacing-sm);
-      padding: var(--spacing-md) var(--spacing-xl);
+      padding: 0.625rem 1.25rem;
       border: none;
-      border-radius: var(--border-radius-md);
+      border-radius: var(--border-radius-lg);
       font-weight: 600;
       font-size: var(--font-size-base);
       cursor: pointer;
       transition: all var(--transition-fast);
       text-decoration: none;
       font-family: var(--font-family);
+      min-height: 44px;
     }
     
     .btn:disabled {
@@ -568,20 +340,22 @@
     .btn-primary {
       background: var(--primary-blue);
       color: var(--white);
+      box-shadow: 0 1px 2px 0 rgba(0, 102, 204, 0.2);
     }
     
     .btn-primary:hover:not(:disabled) {
       background: var(--primary-blue-dark);
-      box-shadow: var(--shadow-md);
+      box-shadow: 0 4px 12px 0 rgba(0, 102, 204, 0.3);
+      transform: translateY(-1px);
     }
     
     .btn-secondary {
-      background: var(--gray-200);
+      background: var(--gray-100);
       color: var(--text-dark);
     }
     
     .btn-secondary:hover:not(:disabled) {
-      background: var(--gray-300);
+      background: var(--gray-200);
     }
     
     .btn-danger {
@@ -590,7 +364,8 @@
     }
     
     .btn-danger:hover:not(:disabled) {
-      background: #C93D4A;
+      background: #DC2626;
+      transform: translateY(-1px);
     }
     
     .btn-success {
@@ -599,13 +374,16 @@
     }
     
     .btn-sm {
-      padding: var(--spacing-sm) var(--spacing-md);
+      padding: 0.5rem 1rem;
       font-size: var(--font-size-sm);
+      min-height: 36px;
     }
     
     .btn-icon {
-      padding: var(--spacing-sm);
+      padding: 0.625rem;
       border-radius: var(--border-radius-full);
+      min-height: 44px;
+      width: 44px;
     }
     
     .input-group {
@@ -615,25 +393,27 @@
     .input-label {
       display: block;
       margin-bottom: var(--spacing-sm);
-      font-weight: 500;
+      font-weight: 600;
       color: var(--text-dark);
       font-size: var(--font-size-sm);
     }
     
     .input-field {
       width: 100%;
-      padding: var(--spacing-md);
+      padding: 0.75rem 1rem;
       border: 1px solid var(--gray-300);
-      border-radius: var(--border-radius-md);
-      font-size: var(--font-size-base);
+      border-radius: var(--border-radius-lg);
+      font-size: 16px;
       font-family: var(--font-family);
       transition: all var(--transition-fast);
+      background: var(--white);
+      min-height: 44px;
     }
     
     .input-field:focus {
       outline: none;
       border-color: var(--primary-blue);
-      box-shadow: 0 0 0 3px rgba(8, 95, 173, 0.1);
+      box-shadow: 0 0 0 3px rgba(0, 102, 204, 0.1);
     }
     
     .input-hint {
@@ -655,10 +435,11 @@
     
     .card {
       background: var(--white);
-      border-radius: var(--border-radius-lg);
+      border-radius: var(--border-radius-xl);
       box-shadow: var(--shadow-sm);
       padding: var(--spacing-xl);
       margin-bottom: var(--spacing-lg);
+      border: 1px solid var(--gray-100);
     }
     
     .card-header {
@@ -667,7 +448,7 @@
       justify-content: space-between;
       margin-bottom: var(--spacing-lg);
       padding-bottom: var(--spacing-md);
-      border-bottom: 1px solid var(--gray-200);
+      border-bottom: 1px solid var(--gray-100);
     }
     
     .card-title {
@@ -683,7 +464,8 @@
       left: 0;
       right: 0;
       bottom: 0;
-      background: rgba(0, 0, 0, 0.5);
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(4px);
       z-index: 1000;
       align-items: center;
       justify-content: center;
@@ -718,7 +500,7 @@
     
     .modal-header {
       padding: var(--spacing-xl);
-      border-bottom: 1px solid var(--gray-200);
+      border-bottom: 1px solid var(--gray-100);
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -730,17 +512,22 @@
     }
     
     .modal-close {
-      background: none;
+      background: var(--gray-100);
       border: none;
       color: var(--text-muted);
       cursor: pointer;
       padding: var(--spacing-sm);
       border-radius: var(--border-radius-full);
       transition: all var(--transition-fast);
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
     
     .modal-close:hover {
-      background: var(--gray-100);
+      background: var(--gray-200);
       color: var(--text-dark);
     }
     
@@ -750,7 +537,7 @@
     
     .modal-footer {
       padding: var(--spacing-xl);
-      border-top: 1px solid var(--gray-200);
+      border-top: 1px solid var(--gray-100);
       display: flex;
       gap: var(--spacing-md);
       justify-content: flex-end;
@@ -758,42 +545,43 @@
     
     .alert {
       padding: var(--spacing-md) var(--spacing-lg);
-      border-radius: var(--border-radius-md);
+      border-radius: var(--border-radius-lg);
       margin-bottom: var(--spacing-lg);
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       gap: var(--spacing-md);
+      border: 1px solid;
     }
     
     .alert-info {
       background: var(--background-light);
       color: var(--primary-blue);
-      border: 1px solid var(--primary-blue-light);
+      border-color: var(--primary-blue-light);
     }
     
     .alert-success {
-      background: #D4F4E2;
-      color: #1E7E4F;
-      border: 1px solid var(--success);
+      background: #ECFDF5;
+      color: #065F46;
+      border-color: var(--success);
     }
     
     .alert-warning {
-      background: #FFF3CD;
-      color: #856404;
-      border: 1px solid var(--warning);
+      background: #FFFBEB;
+      color: #92400E;
+      border-color: var(--warning);
     }
     
     .alert-danger {
-      background: #F8D7DA;
-      color: #842029;
-      border: 1px solid var(--danger);
+      background: #FEF2F2;
+      color: #991B1B;
+      border-color: var(--danger);
     }
     
     .badge {
       display: inline-flex;
       align-items: center;
       gap: var(--spacing-xs);
-      padding: var(--spacing-xs) var(--spacing-md);
+      padding: 0.25rem 0.75rem;
       border-radius: var(--border-radius-full);
       font-size: var(--font-size-xs);
       font-weight: 600;
@@ -805,12 +593,12 @@
     }
     
     .badge-success {
-      background: #D4F4E2;
+      background: #ECFDF5;
       color: var(--success);
     }
     
     .badge-danger {
-      background: #F8D7DA;
+      background: #FEF2F2;
       color: var(--danger);
     }
     
@@ -818,16 +606,12 @@
       background: linear-gradient(90deg, var(--gray-200) 25%, var(--gray-100) 50%, var(--gray-200) 75%);
       background-size: 200% 100%;
       animation: loading 1.5s infinite;
-      border-radius: var(--border-radius-md);
+      border-radius: var(--border-radius-lg);
     }
     
     @keyframes loading {
-      0% {
-        background-position: 200% 0;
-      }
-      100% {
-        background-position: -200% 0;
-      }
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
     }
     
     .empty-state {
@@ -869,6 +653,7 @@
       padding: var(--spacing-2xl);
       width: 100%;
       max-width: 450px;
+      border: 1px solid var(--gray-100);
     }
     
     .auth-logo {
@@ -877,14 +662,14 @@
     }
     
     .auth-logo .logo {
-      width: 60px;
-      height: 60px;
+      width: 72px;
+      height: 72px;
       margin: 0 auto var(--spacing-md);
     }
     
     .auth-title {
       font-size: var(--font-size-2xl);
-      font-weight: 700;
+      font-weight: 800;
       text-align: center;
       margin-bottom: var(--spacing-md);
       color: var(--text-dark);
@@ -894,31 +679,6 @@
       text-align: center;
       color: var(--text-muted);
       margin-bottom: var(--spacing-xl);
-    }
-    
-    .auth-divider {
-      text-align: center;
-      margin: var(--spacing-lg) 0;
-      color: var(--text-muted);
-      position: relative;
-    }
-    
-    .auth-divider::before,
-    .auth-divider::after {
-      content: '';
-      position: absolute;
-      top: 50%;
-      width: 40%;
-      height: 1px;
-      background: var(--gray-300);
-    }
-    
-    .auth-divider::before {
-      left: 0;
-    }
-    
-    .auth-divider::after {
-      right: 0;
     }
     
     .auth-footer {
@@ -932,7 +692,7 @@
       text-decoration: none;
       font-weight: 600;
     }
-
+    
     .auth-link:hover {
       text-decoration: underline;
     }
@@ -943,11 +703,12 @@
     
     .feed-post {
       background: var(--white);
-      border-radius: var(--border-radius-lg);
+      border-radius: var(--border-radius-xl);
       padding: var(--spacing-lg);
       margin-bottom: var(--spacing-lg);
       box-shadow: var(--shadow-sm);
       transition: box-shadow var(--transition-fast);
+      border: 1px solid var(--gray-100);
     }
     
     .feed-post:hover {
@@ -956,7 +717,7 @@
     
     .post-header {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       gap: var(--spacing-md);
       margin-bottom: var(--spacing-md);
     }
@@ -970,13 +731,14 @@
       align-items: center;
       justify-content: center;
       color: var(--white);
-      font-weight: 600;
+      font-weight: 700;
       font-size: var(--font-size-lg);
       flex-shrink: 0;
     }
     
     .post-info {
       flex: 1;
+      min-width: 0;
     }
     
     .post-author {
@@ -985,6 +747,7 @@
       gap: var(--spacing-sm);
       font-weight: 600;
       color: var(--text-dark);
+      flex-wrap: wrap;
     }
     
     .post-time {
@@ -993,16 +756,32 @@
       cursor: help;
     }
     
+    .post-menu {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: var(--spacing-xs);
+      border-radius: var(--border-radius-md);
+      transition: all var(--transition-fast);
+    }
+    
+    .post-menu:hover {
+      background: var(--gray-100);
+      color: var(--text-dark);
+    }
+    
     .post-content {
       margin-bottom: var(--spacing-md);
       line-height: 1.6;
       white-space: pre-wrap;
       word-wrap: break-word;
+      color: var(--text-dark);
     }
     
     .post-media {
       margin-bottom: var(--spacing-md);
-      border-radius: var(--border-radius-md);
+      border-radius: var(--border-radius-lg);
       overflow: hidden;
     }
     
@@ -1015,9 +794,9 @@
     
     .post-actions {
       display: flex;
-      gap: var(--spacing-lg);
+      gap: var(--spacing-md);
       padding-top: var(--spacing-md);
-      border-top: 1px solid var(--gray-200);
+      border-top: 1px solid var(--gray-100);
     }
     
     .post-action-btn {
@@ -1029,29 +808,24 @@
       color: var(--text-muted);
       cursor: pointer;
       padding: var(--spacing-sm) var(--spacing-md);
-      border-radius: var(--border-radius-md);
+      border-radius: var(--border-radius-lg);
       font-size: var(--font-size-sm);
       font-weight: 500;
       transition: all var(--transition-fast);
+      min-height: 36px;
     }
     
     .post-action-btn:hover {
-      background: var(--gray-100);
+      background: var(--gray-50);
       color: var(--primary-blue);
     }
     
     .post-action-btn.active {
-      color: var(--primary-blue);
+      color: var(--danger);
     }
     
     .post-action-btn .material-icons {
       font-size: 20px;
-    }
-    
-    .comment-section {
-      margin-top: var(--spacing-lg);
-      padding-top: var(--spacing-lg);
-      border-top: 1px solid var(--gray-200);
     }
     
     .comment {
@@ -1076,6 +850,7 @@
     
     .comment-content {
       flex: 1;
+      min-width: 0;
     }
     
     .comment-author {
@@ -1091,7 +866,7 @@
     }
     
     .comment-time {
-      font-size: var(--font-size-xs);
+        font-size: var(--font-size-xs);
       color: var(--text-muted);
       margin-top: var(--spacing-xs);
     }
@@ -1104,11 +879,12 @@
     
     .comment-input {
       flex: 1;
-      padding: var(--spacing-md);
+      padding: 0.75rem 1rem;
       border: 1px solid var(--gray-300);
       border-radius: var(--border-radius-full);
-      font-size: var(--font-size-sm);
+      font-size: 16px;
       font-family: var(--font-family);
+      min-height: 44px;
     }
     
     /* ═══════════════════════════════════════════════════════════════════
@@ -1119,13 +895,14 @@
       display: flex;
       height: calc(100vh - 120px);
       background: var(--white);
-      border-radius: var(--border-radius-lg);
+      border-radius: var(--border-radius-xl);
       overflow: hidden;
       box-shadow: var(--shadow-sm);
+      border: 1px solid var(--gray-100);
     }
     
     .chat-sidebar {
-      width: 300px;
+      width: 320px;
       border-right: 1px solid var(--gray-200);
       display: flex;
       flex-direction: column;
@@ -1143,13 +920,13 @@
     
     .chat-item {
       padding: var(--spacing-lg);
-      border-bottom: 1px solid var(--gray-200);
+      border-bottom: 1px solid var(--gray-100);
       cursor: pointer;
       transition: background var(--transition-fast);
     }
     
     .chat-item:hover {
-      background: var(--gray-100);
+      background: var(--gray-50);
     }
     
     .chat-item.active {
@@ -1231,6 +1008,7 @@
     
     .message-content {
       flex: 1;
+      min-width: 0;
     }
     
     .message-author {
@@ -1245,8 +1023,8 @@
     }
     
     .message-bubble {
-      background: var(--gray-100);
-      padding: var(--spacing-md);
+      background: var(--gray-50);
+      padding: 0.75rem 1rem;
       border-radius: var(--border-radius-lg);
       word-wrap: break-word;
       line-height: 1.5;
@@ -1255,7 +1033,6 @@
     .message.own .message-bubble {
       background: var(--primary-blue);
       color: var(--white);
-      border-bottom-right-radius: var(--border-radius-sm);
     }
     
     .message-time {
@@ -1271,6 +1048,7 @@
     .chat-input-container {
       padding: var(--spacing-lg);
       border-top: 1px solid var(--gray-200);
+      background: var(--gray-50);
     }
     
     .chat-input-form {
@@ -1280,11 +1058,13 @@
     
     .chat-input {
       flex: 1;
-      padding: var(--spacing-md);
+      padding: 0.75rem 1rem;
       border: 1px solid var(--gray-300);
       border-radius: var(--border-radius-full);
-      font-size: var(--font-size-base);
+      font-size: 16px;
       font-family: var(--font-family);
+      background: var(--white);
+      min-height: 44px;
     }
     
     /* ═══════════════════════════════════════════════════════════════════
@@ -1308,7 +1088,7 @@
       color: var(--white);
       font-size: var(--font-size-3xl);
       font-weight: 700;
-      box-shadow: 0 0 40px rgba(8, 95, 173, 0.3);
+      box-shadow: 0 0 50px rgba(0, 102, 204, 0.3);
       transition: transform 4s cubic-bezier(0.4, 0, 0.2, 1);
     }
     
@@ -1341,10 +1121,11 @@
     .mood-option {
       text-align: center;
       padding: var(--spacing-lg);
-      border: 2px solid var(--gray-300);
-      border-radius: var(--border-radius-lg);
+      border: 2px solid var(--gray-200);
+      border-radius: var(--border-radius-xl);
       cursor: pointer;
       transition: all var(--transition-fast);
+      min-height: 44px;
     }
     
     .mood-option:hover {
@@ -1371,8 +1152,8 @@
     .mood-chart {
       margin-top: var(--spacing-xl);
       padding: var(--spacing-lg);
-      background: var(--gray-100);
-      border-radius: var(--border-radius-lg);
+      background: var(--gray-50);
+      border-radius: var(--border-radius-xl);
     }
     
     /* ═══════════════════════════════════════════════════════════════════
@@ -1392,7 +1173,7 @@
     }
     
     .admin-table th {
-      background: var(--gray-100);
+      background: var(--gray-50);
       font-weight: 600;
       color: var(--text-dark);
       font-size: var(--font-size-sm);
@@ -1407,6 +1188,7 @@
     .admin-actions {
       display: flex;
       gap: var(--spacing-sm);
+      flex-wrap: wrap;
     }
     
     /* ═══════════════════════════════════════════════════════════════════
@@ -1414,22 +1196,25 @@
        ═══════════════════════════════════════════════════════════════════ */
     
     .crisis-banner {
-      background: linear-gradient(135deg, var(--danger) 0%, #C93D4A 100%);
+      background: linear-gradient(135deg, var(--danger) 0%, #DC2626 100%);
       color: var(--white);
       padding: var(--spacing-lg);
-      border-radius: var(--border-radius-lg);
+      border-radius: var(--border-radius-xl);
       margin-bottom: var(--spacing-xl);
       display: flex;
       align-items: center;
-      gap: var(--spacing-md);
+      gap: var(--spacing-lg);
+      box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);
     }
     
     .crisis-banner .material-icons {
       font-size: 32px;
+      flex-shrink: 0;
     }
     
     .crisis-content {
       flex: 1;
+      min-width: 0;
     }
     
     .crisis-title {
@@ -1444,57 +1229,399 @@
     }
     
     /* ═══════════════════════════════════════════════════════════════════
-       RESPONSIVE DESIGN
+       SCROLL TO TOP BUTTON
+       ═══════════════════════════════════════════════════════════════════ */
+    
+    .scroll-top-btn {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 999;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+      box-shadow: var(--shadow-lg);
+    }
+    
+    .scroll-top-btn.visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    
+    /* ═══════════════════════════════════════════════════════════════════
+       RESPONSIVE DESIGN - MOBILE OPTIMIZATIONS
        ═══════════════════════════════════════════════════════════════════ */
     
     @media (max-width: 1024px) {
       .sidebar {
-        width: 240px;
+        width: 260px;
       }
       
       .main-content {
-        margin-left: 240px;
+        margin-left: 260px;
       }
     }
     
     @media (max-width: 768px) {
+      /* Mobile Header - Always visible */
       .mobile-header {
         display: flex;
       }
       
+      /* Sidebar - Hidden by default, slides in */
       .sidebar {
         transform: translateX(-100%);
+        box-shadow: var(--shadow-xl);
+        width: 280px;
       }
       
       .sidebar.visible {
         transform: translateX(0);
       }
       
+      /* Backdrop for mobile menu */
+      .sidebar::after {
+        content: '';
+        position: fixed;
+        top: 0;
+        left: 280px;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        backdrop-filter: blur(4px);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.3s ease;
+      }
+      
+      .sidebar.visible::after {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      
+      /* Main content - Full width */
       .main-content {
         margin-left: 0;
         padding: var(--spacing-md);
+        padding-top: var(--spacing-md);
+      }
+      
+      /* Crisis Banner - More compact */
+      .crisis-banner {
+        flex-direction: column;
+        text-align: center;
+        padding: var(--spacing-md);
+        gap: var(--spacing-md);
+      }
+      
+      .crisis-banner .material-icons {
+        font-size: 28px;
+      }
+      
+      .crisis-title {
+        font-size: var(--font-size-base);
+      }
+      
+      .crisis-text {
+        font-size: var(--font-size-xs);
+      }
+      
+      /* Cards - Reduced padding */
+      .card {
+        padding: var(--spacing-md);
+        margin-bottom: var(--spacing-md);
+      }
+      
+      .card-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--spacing-md);
+      }
+      
+      .card-header .btn {
+        width: 100%;
+      }
+      
+      .card-title {
+        font-size: var(--font-size-lg);
+      }
+      
+      /* Feed Posts */
+      .feed-post {
+        padding: var(--spacing-md);
+        margin-bottom: var(--spacing-md);
+      }
+      
+      .post-avatar {
+        width: 42px;
+        height: 42px;
+        font-size: var(--font-size-base);
+      }
+      
+      .post-actions {
+        flex-wrap: wrap;
+        gap: var(--spacing-sm);
+      }
+      
+      .post-action-btn {
+        flex: 1;
+        justify-content: center;
+        min-width: calc(33.333% - var(--spacing-sm));
+      }
+      
+      /* Comments */
+      .comment-avatar {
+        width: 32px;
+        height: 32px;
+      }
+      
+      .comment-form {
+        flex-direction: column;
+      }
+      
+      .comment-form .btn {
+        width: 100%;
+      }
+      
+      /* Chat Container */
+      .chat-container {
+        height: calc(100vh - 80px);
+        flex-direction: column;
       }
       
       .chat-sidebar {
+        width: 100%;
+        max-height: 50vh;
+        position: relative;
         display: none;
+        border-right: none;
+        border-bottom: 1px solid var(--gray-200);
       }
       
       .chat-sidebar.visible {
         display: flex;
-        position: absolute;
-        left: 0;
-        top: 0;
-        bottom: 0;
-        z-index: 10;
-        background: var(--white);
       }
       
+      /* Chat Messages */
       .message {
         max-width: 85%;
       }
       
+      .message-avatar {
+        width: 32px;
+        height: 32px;
+      }
+      
+      /* Mood Tracker */
       .mood-tracker-grid {
         grid-template-columns: repeat(3, 1fr);
+        gap: var(--spacing-sm);
+      }
+      
+      .mood-option {
+        padding: var(--spacing-md);
+      }
+      
+      .mood-emoji {
+        font-size: 36px;
+      }
+      
+      .mood-label {
+        font-size: var(--font-size-xs);
+      }
+      
+      /* Breathing Exercise */
+      .breathing-exercise {
+        padding: var(--spacing-lg);
+      }
+      
+      .breathing-circle {
+        width: 160px;
+        height: 160px;
+        font-size: var(--font-size-2xl);
+      }
+      
+      .breathing-instruction {
+        font-size: var(--font-size-lg);
+      }
+      
+      /* Admin Table - Horizontal scroll */
+      .admin-table {
+        display: block;
+        overflow-x: auto;
+        white-space: nowrap;
+      }
+      
+      .admin-table th,
+      .admin-table td {
+        padding: var(--spacing-sm);
+        font-size: var(--font-size-xs);
+      }
+      
+      .admin-actions {
+        flex-direction: column;
+      }
+      
+      .admin-actions .btn {
+        width: 100%;
+      }
+      
+      /* Modals - Better mobile layout */
+      .modal {
+        max-width: 95%;
+        max-height: 90vh;
+        margin: var(--spacing-sm);
+      }
+      
+      .modal-header,
+      .modal-body,
+      .modal-footer {
+        padding: var(--spacing-md);
+      }
+      
+      .modal-title {
+        font-size: var(--font-size-lg);
+      }
+      
+      .modal-footer {
+        flex-direction: column-reverse;
+      }
+      
+      .modal-footer .btn {
+        width: 100%;
+      }
+      
+      /* Auth Pages */
+      .auth-card {
+        padding: var(--spacing-lg);
+        max-width: 100%;
+      }
+      
+      .auth-title {
+        font-size: var(--font-size-xl);
+      }
+      
+      .auth-logo .logo {
+        width: 60px;
+        height: 60px;
+      }
+      
+      /* Diary Entries - Stack buttons */
+      .card .flex {
+        flex-direction: column;
+        align-items: stretch !important;
+      }
+      
+      .card .flex .btn {
+        width: 100%;
+        margin-top: var(--spacing-sm);
+      }
+      
+      /* Profile Settings */
+      #profilePage .flex {
+        flex-direction: column;
+      }
+      
+      #profilePage .btn {
+        width: 100%;
+      }
+      
+      /* Scroll to top button */
+      .scroll-top-btn {
+        bottom: 16px;
+        right: 16px;
+      }
+    }
+    
+    @media (max-width: 480px) {
+      /* Extra small devices */
+      :root {
+        --font-size-base: 0.9375rem;
+        --spacing-md: 0.875rem;
+        --spacing-lg: 1.25rem;
+      }
+      
+      .main-content {
+        padding: var(--spacing-sm);
+      }
+      
+      .card {
+        padding: var(--spacing-sm);
+      }
+      
+      .feed-post {
+        padding: var(--spacing-sm);
+      }
+      
+      .post-avatar {
+        width: 36px;
+        height: 36px;
+      }
+      
+      .mood-tracker-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      
+      .breathing-circle {
+        width: 140px;
+        height: 140px;
+      }
+      
+      .nav-link {
+        padding: var(--spacing-sm) var(--spacing-md);
+        font-size: var(--font-size-sm);
+      }
+      
+      .nav-link .material-icons {
+        font-size: 20px;
+      }
+    }
+    
+    /* Landscape orientation fixes */
+    @media (max-width: 768px) and (orientation: landscape) {
+      .chat-container {
+        height: calc(100vh - 60px);
+      }
+      
+      .breathing-exercise {
+        padding: var(--spacing-md);
+      }
+      
+      .breathing-circle {
+        width: 120px;
+        height: 120px;
+        margin-bottom: var(--spacing-md);
+      }
+    }
+    
+    /* Touch-friendly improvements */
+    @media (hover: none) and (pointer: coarse) {
+      .post-action-btn,
+      .nav-link,
+      .chat-item,
+      .mood-option {
+        min-height: 44px;
+      }
+      
+      .chat-messages,
+      .chat-list,
+      .sidebar {
+        -webkit-overflow-scrolling: touch;
+      }
+    }
+    
+    /* Reduced motion support */
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+      
+      .breathing-circle {
+        transition: none;
       }
     }
     
@@ -1575,7 +1702,9 @@
   <div id="loginPage" class="auth-container">
     <div class="auth-card">
       <div class="auth-logo">
-        <div class="logo">S</div>
+        <div class="logo">
+          <img src="images/logo.png" alt="Safespace Logo" onerror="this.parentElement.innerHTML='<div style=\'width:100%;height:100%;background:linear-gradient(135deg, #0066CC 0%, #3399FF 100%);border-radius:12px;display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:32px;\'>S</div>'">
+        </div>
         <div class="logo-text">Safespace</div>
       </div>
       <h1 class="auth-title">Welcome Back</h1>
@@ -1589,12 +1718,12 @@
       <form id="loginForm">
         <div class="input-group">
           <label class="input-label">Email</label>
-          <input type="email" id="loginEmail" class="input-field" required>
+          <input type="email" id="loginEmail" class="input-field" required autocomplete="email">
         </div>
         
         <div class="input-group">
           <label class="input-label">Password</label>
-          <input type="password" id="loginPassword" class="input-field" required>
+          <input type="password" id="loginPassword" class="input-field" required autocomplete="current-password">
         </div>
         
         <button type="submit" class="btn btn-primary" style="width: 100%;">
@@ -1614,7 +1743,9 @@
   <div id="registerPage" class="auth-container hidden">
     <div class="auth-card">
       <div class="auth-logo">
-        <div class="logo">S</div>
+        <div class="logo">
+          <img src="images/logo.png" alt="Safespace Logo" onerror="this.parentElement.innerHTML='<div style=\'width:100%;height:100%;background:linear-gradient(135deg, #0066CC 0%, #3399FF 100%);border-radius:12px;display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:32px;\'>S</div>'">
+        </div>
         <div class="logo-text">Safespace</div>
       </div>
       <h1 class="auth-title">Create Account</h1>
@@ -1633,19 +1764,19 @@
       <form id="registerForm">
         <div class="input-group">
           <label class="input-label">Username</label>
-          <input type="text" id="registerUsername" class="input-field" required minlength="3" maxlength="30">
+          <input type="text" id="registerUsername" class="input-field" required minlength="3" maxlength="30" autocomplete="username">
           <div class="input-hint">Choose a pseudonym that feels safe to you (3-30 characters)</div>
         </div>
         
         <div class="input-group">
           <label class="input-label">Email</label>
-          <input type="email" id="registerEmail" class="input-field" required>
+          <input type="email" id="registerEmail" class="input-field" required autocomplete="email">
           <div class="input-hint">We'll never share your email</div>
         </div>
         
         <div class="input-group">
           <label class="input-label">Password</label>
-          <input type="password" id="registerPassword" class="input-field" required minlength="6">
+          <input type="password" id="registerPassword" class="input-field" required minlength="6" autocomplete="new-password">
           <div class="input-hint">Minimum 6 characters</div>
         </div>
         
@@ -1664,7 +1795,9 @@
   <div id="forgotPasswordPage" class="auth-container hidden">
     <div class="auth-card">
       <div class="auth-logo">
-        <div class="logo">S</div>
+        <div class="logo">
+          <img src="images/logo.png" alt="Safespace Logo" onerror="this.parentElement.innerHTML='<div style=\'width:100%;height:100%;background:linear-gradient(135deg, #0066CC 0%, #3399FF 100%);border-radius:12px;display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:32px;\'>S</div>'">
+        </div>
         <div class="logo-text">Safespace</div>
       </div>
       <h1 class="auth-title">Reset Password</h1>
@@ -1683,7 +1816,7 @@
       <form id="forgotPasswordForm">
         <div class="input-group">
           <label class="input-label">Email</label>
-          <input type="email" id="resetEmail" class="input-field" required>
+          <input type="email" id="resetEmail" class="input-field" required autocomplete="email">
         </div>
         
         <button type="submit" class="btn btn-primary" style="width: 100%;">
@@ -1708,14 +1841,22 @@
       <button class="mobile-menu-btn" id="mobileMenuBtn">
         <span class="material-icons">menu</span>
       </button>
-      <div class="logo-text">Safespace</div>
-      <div></div>
+
+      <div class="mobile-logo">
+        <div class="logo">
+          <img src="images/logo.png" alt="Safespace Logo" onerror="this.parentElement.innerHTML='<div style=\'width:100%;height:100%;background:linear-gradient(135deg, #0066CC 0%, #3399FF 100%);border-radius:12px;display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:20px;\'>S</div>'">
+        </div>
+        <div class="logo-text">Safespace</div>
+      </div>
+      <div style="width: 40px;"></div>
     </div>
     
     <!-- Sidebar Navigation -->
     <nav class="sidebar" id="sidebar">
       <div class="sidebar-header">
-        <div class="logo">S</div>
+        <div class="logo">
+          <img src="images/logo.png" alt="Safespace Logo" onerror="this.parentElement.innerHTML='<div style=\'width:100%;height:100%;background:linear-gradient(135deg, #0066CC 0%, #3399FF 100%);border-radius:12px;display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:24px;\'>S</div>'">
+        </div>
         <div class="logo-text">Safespace</div>
       </div>
       
@@ -1780,12 +1921,10 @@
         <div class="crisis-content">
           <div class="crisis-title">Need Immediate Help?</div>
           <div class="crisis-text">
-            If you’re in crisis, please reach out for help right now.
-Call your local emergency services (911) or contact:
-            <strong>NCMH Crisis Hotline (National Center for Mental Health)</strong> 
-            <strong>Landline (Luzon-wide): 1553 | </strong>
-            <strong>Globe/TM: 0966-351-4518 / 0908-639-2672 | </strong>
-            <strong>Smart/Sun/TNT: 0909-901-8727</strong>
+            If you're in crisis, call your local emergency services or:
+            <strong>NCMH Crisis Hotline: 0917-899-8727 (USAP)</strong> |
+            <strong>In Touch Crisis Line: (02) 8893-7603</strong> |
+            <strong>Natasha Goulbourn Foundation: 0917-558-4673 (HOPE)</strong>
           </div>
         </div>
         <button class="btn btn-secondary btn-sm" id="showResourcesModal">View Resources</button>
@@ -2045,7 +2184,7 @@ Call your local emergency services (911) or contact:
           
           <h3>Account Actions</h3>
           
-          <div style="display: flex; gap: var(--spacing-md); margin-top: var(--spacing-lg);">
+          <div style="display: flex; gap: var(--spacing-md); margin-top: var(--spacing-lg); flex-wrap: wrap;">
             <button class="btn btn-secondary" id="exportDataBtn">
               <span class="material-icons">download</span>
               Export My Data
@@ -2229,51 +2368,36 @@ Call your local emergency services (911) or contact:
       <div class="modal-body">
         <div class="alert alert-danger">
           <span class="material-icons">emergency</span>
-          <span><strong>In immediate danger?</strong> Call 911 or go to your nearest hospital emergency room.</span>
+          <span><strong>In immediate danger?</strong> Call 911 or your local emergency services.</span>
         </div>
         
-        <h4>Philippines</h4>
+        <h4>Philippines Crisis Hotlines</h4>
         <ul style="line-height: 2; margin-bottom: var(--spacing-lg);">
-        <strong>NCMH Crisis (National Center for Mental Health)</strong>
-          <li><strong>Luzon-wide (landline):</strong> 1553</li>
-          <li><strong>Globe / TM:</strong> 0966-351-4518 / 0908-639-2672</li>
-          <li><strong>Smart / Sun / TNT:</strong> 0909-901-8727</li>
-          <strong>Hopeline Philippines</strong>        
-          <li><strong>Landline:</strong> (02) 8804-4673</li>
-          <li><strong>Globe:</strong> 0917-558-4673</li>
-          <li><strong>PLDT / Smart:</strong> (02) 8804-4673</li>
-          <strong>In Touch Community Services (24/7)</strong>
-          <li><strong>Landline:</strong> (02) 8893-7603</li>
-          <li><strong>Globe:</strong> 0917-800-1123</li>
-          <li><strong>Smart:</strong> 0922-893-8944</li>
-          <strong>Philippine Red Cross Mental Health Hotline</strong>
-            <li><strong>143 then press 2</strong></li>
-          <li><strong>Smart / Sun:</strong> 0939-937-0009</li>
-          <li><strong>Globe / TM:</strong> 0956-563-6659</li>
-
-
-        </ul>
-
-        <h4>United States</h4>
-        <ul style="line-height: 2; margin-bottom: var(--spacing-lg);">
-          <li><strong>988 Suicide & Crisis Lifeline:</strong> Call or text 988</li>
-          <li><strong>Crisis Text Line:</strong> Text HOME to 741741</li>
-          <li><strong>SAMHSA National Helpline:</strong> 1-800-662-4357</li>
-          <li><strong>Trevor Project (LGBTQ+ Youth):</strong> 1-866-488-7386</li>
-          <li><strong>Veterans Crisis Line:</strong> Call 988 then press 1</li>
+          <li><strong>NCMH Crisis Hotline:</strong> 0917-899-8727 (USAP) | (02) 7-989-8727</li>
+          <li><strong>In Touch Crisis Line:</strong> (02) 8893-7603 | 0917-800-1123</li>
+          <li><strong>Natasha Goulbourn Foundation:</strong> 0917-558-4673 (HOPE)</li>
+          <li><strong>DOH Mental Health Hotline:</strong> 1553 (Luzon-wide toll-free)</li>
+          <li><strong>Hopeline Philippines:</strong> (02) 8804-4673 | 0917-558-4673 | 2919 (Globe/TM)</li>
         </ul>
         
-        <h4>International</h4>
+        <h4>Text Support</h4>
         <ul style="line-height: 2; margin-bottom: var(--spacing-lg);">
-          <li><strong>International Association for Suicide Prevention:</strong> <a href="https://www.iasp.info/resources/Crisis_Centres/" target="_blank">Find your country</a></li>
-          <li><strong>Befrienders Worldwide:</strong> <a href="https://www.befrienders.org/" target="_blank">befrienders.org</a></li>
+          <li><strong>Crisis Line (In Touch):</strong> Text "USAP" to 2919 (Globe/TM)</li>
+          <li><strong>Natasha Goulbourn Foundation:</strong> Text HOPELINE to 2919</li>
         </ul>
         
-        <h4>Online Support</h4>
+        <h4>Online Support & Resources</h4>
+        <ul style="line-height: 2; margin-bottom: var(--spacing-lg);">
+          <li><strong>MindNation:</strong> Online mental health platform (mindnation.com)</li>
+          <li><strong>Silakbo PH:</strong> Free mental health support (silakbo.ph)</li>
+          <li><strong>PGH Psychiatry:</strong> (02) 8554-8400 local 2436</li>
+        </ul>
+        
+        <h4>Emergency Services</h4>
         <ul style="line-height: 2;">
-          <li><strong>7 Cups:</strong> Free emotional support chat</li>
-          <li><strong>BetterHelp:</strong> Online therapy (paid)</li>
-          <li><strong>NAMI:</strong> Mental health education and support groups</li>
+          <li><strong>National Emergency Hotline:</strong> 911</li>
+          <li><strong>Philippine Red Cross:</strong> 143</li>
+          <li><strong>PNP Hotline:</strong> (02) 8722-0650</li>
         </ul>
         
         <div class="alert alert-info mt-3">
@@ -2332,6 +2456,11 @@ Call your local emergency services (911) or contact:
     </div>
   </div>
 
+  <!-- Scroll to Top Button -->
+  <button class="btn btn-primary btn-icon scroll-top-btn" id="scrollTopBtn">
+    <span class="material-icons">arrow_upward</span>
+  </button>
+
   <!-- ═══════════════════════════════════════════════════════════════════
        JAVASCRIPT APPLICATION CODE
        ═══════════════════════════════════════════════════════════════════ -->
@@ -2354,9 +2483,14 @@ Call your local emergency services (911) or contact:
       breathingInterval: null,
       currentChatThread: null,
       reauthCallback: null,
+      currentCommentPostId: null,
+      editingDiaryId: null,
+      selectedMoodEmoji: null,
+      publicChatUnsubscribe: null,
+      privateChatUnsubscribe: null,
       rateLimiter: {
-        posts: { count: 0, resetTime: Date.now() + 60000 }, // 5 posts per minute
-        messages: { count: 0, resetTime: Date.now() + 60000 } // 20 messages per minute
+        posts: { count: 0, resetTime: Date.now() + 60000 },
+        messages: { count: 0, resetTime: Date.now() + 60000 }
       }
     };
     
@@ -2535,6 +2669,16 @@ Call your local emergency services (911) or contact:
     function cleanupListeners() {
       app.unsubscribers.forEach(unsub => unsub());
       app.unsubscribers = [];
+      
+      if (app.publicChatUnsubscribe) {
+        app.publicChatUnsubscribe();
+        app.publicChatUnsubscribe = null;
+      }
+      
+      if (app.privateChatUnsubscribe) {
+        app.privateChatUnsubscribe();
+        app.privateChatUnsubscribe = null;
+      }
     }
     
     // ═══════════════════════════════════════════════════════════════════
@@ -2543,8 +2687,6 @@ Call your local emergency services (911) or contact:
     
     /**
      * Generate device fingerprint for blocking
-     * NOTE: This is a simple fingerprint and can be bypassed. For production,
-     * use a proper fingerprinting library or server-side tracking.
      */
     function generateDeviceFingerprint() {
       const nav = window.navigator;
@@ -2560,7 +2702,6 @@ Call your local emergency services (911) or contact:
         !!window.localStorage
       ].join('|');
       
-      // Simple hash function
       let hash = 0;
       for (let i = 0; i < fingerprint.length; i++) {
         const char = fingerprint.charCodeAt(i);
@@ -2579,7 +2720,6 @@ Call your local emergency services (911) or contact:
         const { collection, query, where, getDocs } = window.FirebaseModules;
         const fingerprint = generateDeviceFingerprint();
         
-        // Check if fingerprint or email is blocked
         const blockedQuery = query(
           collection(app.db, 'blockedIdentifiers'),
           where('fingerprintHash', '==', fingerprint)
@@ -2590,7 +2730,6 @@ Call your local emergency services (911) or contact:
           return { blocked: true, reason: 'Device fingerprint blocked' };
         }
         
-        // Check email
         const emailQuery = query(
           collection(app.db, 'blockedIdentifiers'),
           where('email', '==', email.toLowerCase())
@@ -2618,13 +2757,11 @@ Call your local emergency services (911) or contact:
       const email = document.getElementById('registerEmail').value.trim();
       const password = document.getElementById('registerPassword').value;
       
-      // Validate username
       if (username.length < 3 || username.length > 30) {
         showAuthError('register', 'Username must be between 3 and 30 characters');
         return;
       }
       
-      // Check if blocked
       const blockCheck = await checkBlocked(email);
       if (blockCheck.blocked) {
         showAuthError('register', 'Unable to create account. ' + blockCheck.reason);
@@ -2635,14 +2772,11 @@ Call your local emergency services (911) or contact:
         const { createUserWithEmailAndPassword, updateProfile } = window.FirebaseModules;
         const { doc, setDoc, serverTimestamp } = window.FirebaseModules;
         
-        // Create auth user
         const userCredential = await createUserWithEmailAndPassword(app.auth, email, password);
         const user = userCredential.user;
         
-        // Update profile with username
         await updateProfile(user, { displayName: username });
         
-        // Create user document in Firestore
         await setDoc(doc(app.db, 'users', user.uid), {
           username: username,
           email: email,
@@ -2712,7 +2846,6 @@ Call your local emergency services (911) or contact:
         const { signOut } = window.FirebaseModules;
         await signOut(app.auth);
         
-        // Clear cached data
         localStorage.removeItem('safespace_feed_cache');
         
       } catch (error) {
@@ -2762,18 +2895,15 @@ Call your local emergency services (911) or contact:
      * Navigate to a different page
      */
     function navigateToPage(pageName) {
-      // Hide all pages
       document.querySelectorAll('.page-content').forEach(page => {
         page.classList.add('hidden');
       });
       
-      // Show selected page
       const selectedPage = document.getElementById(`${pageName}Page`);
       if (selectedPage) {
         selectedPage.classList.remove('hidden');
       }
       
-      // Update active nav link
       document.querySelectorAll('.nav-link').forEach(link => {
         link.classList.remove('active');
       });
@@ -2785,10 +2915,8 @@ Call your local emergency services (911) or contact:
       
       app.currentPage = pageName;
       
-      // Load page-specific data
       loadPageData(pageName);
       
-      // Close mobile menu
       closeMobileMenu();
     }
     
@@ -2841,28 +2969,32 @@ Call your local emergency services (911) or contact:
      * Toggle mobile menu
      */
     function toggleMobileMenu() {
-      document.getElementById('sidebar').classList.toggle('visible');
+      const sidebar = document.getElementById('sidebar');
+      sidebar.classList.toggle('visible');
+      document.body.classList.toggle('menu-open');
     }
     
     /**
      * Close mobile menu
      */
     function closeMobileMenu() {
-      document.getElementById('sidebar').classList.remove('visible');
+      const sidebar = document.getElementById('sidebar');
+      sidebar.classList.remove('visible');
+      document.body.classList.remove('menu-open');
     }
     
     /**
      * Show general error message
      */
     function showError(message) {
-      alert(message); // Simple implementation, could be improved with toast notifications
+      alert(message);
     }
     
     /**
      * Show success message
      */
     function showSuccess(message) {
-      alert(message); // Simple implementation, could be improved with toast notifications
+      alert(message);
     }
     
     // ═══════════════════════════════════════════════════════════════════
@@ -2884,7 +3016,6 @@ Call your local emergency services (911) or contact:
           app.feedPosts = [];
         }
         
-        // Build query
         let feedQuery = query(
           collection(app.db, 'feed'),
           orderBy('createdAt', 'desc'),
@@ -2918,22 +3049,18 @@ Call your local emergency services (911) or contact:
           return;
         }
         
-        // Store last document for pagination
         app.lastFeedDoc = snapshot.docs[snapshot.docs.length - 1];
         
-        // Clear skeleton on first load
         if (!loadMore) {
           feedContainer.innerHTML = '';
         }
         
-        // Render posts
         snapshot.forEach(doc => {
           const post = { id: doc.id, ...doc.data() };
           app.feedPosts.push(post);
           renderFeedPost(post, feedContainer);
         });
         
-        // Cache feed posts
         cacheFeedPosts();
         
       } catch (error) {
@@ -2953,14 +3080,14 @@ Call your local emergency services (911) or contact:
       const isLiked = post.likes && post.likes[app.currentUser.uid];
       const likesCount = post.likes ? Object.keys(post.likes).length : 0;
       
-      // Format timestamp
       const createdAt = post.createdAt?.toDate?.() || new Date();
       const timeAgo = formatTimeAgo(createdAt);
       const exactTime = createdAt.toLocaleString();
       
-      // Get author initial
       const authorName = post.isAnonymous ? 'Anonymous' : (post.authorUsername || 'User');
       const authorInitial = authorName.charAt(0).toUpperCase();
+      
+      const isOwnPost = post.authorUid === app.currentUser.uid;
       
       let mediaHtml = '';
       if (post.mediaDataUrl) {
@@ -2991,6 +3118,11 @@ Call your local emergency services (911) or contact:
             </div>
             <div class="post-time" title="${exactTime}">${timeAgo}</div>
           </div>
+          ${isOwnPost && !post.isAnonymous ? `
+            <button class="post-menu" onclick="deletePost('${post.id}')">
+              <span class="material-icons">delete</span>
+            </button>
+          ` : ''}
         </div>
         
         <div class="post-content">${escapeHtml(post.text)}</div>
@@ -3019,6 +3151,41 @@ Call your local emergency services (911) or contact:
     }
     
     /**
+     * Delete post
+     */
+    async function deletePost(postId) {
+      if (!confirm('Delete this post? This cannot be undone.')) return;
+      
+      try {
+        const { doc, deleteDoc, collection, getDocs } = window.FirebaseModules;
+        
+        // Delete comments first
+        const commentsSnapshot = await getDocs(
+          collection(app.db, 'feed', postId, 'comments')
+        );
+        
+        for (const commentDoc of commentsSnapshot.docs) {
+          await deleteDoc(commentDoc.ref);
+        }
+        
+        // Delete post
+        await deleteDoc(doc(app.db, 'feed', postId));
+        
+        // Remove from UI
+        const postElement = document.querySelector(`.feed-post[data-post-id="${postId}"]`);
+        if (postElement) {
+          postElement.remove();
+        }
+        
+        showSuccess('Post deleted');
+        
+      } catch (error) {
+        console.error('Error deleting post:', error);
+        showError('Failed to delete post');
+      }
+    }
+    
+    /**
      * Create new post
      */
     async function createPost() {
@@ -3031,7 +3198,6 @@ Call your local emergency services (911) or contact:
         return;
       }
       
-      // Rate limiting
       if (!checkRateLimit('posts', 5)) {
         showError('Too many posts. Please wait a moment.');
         return;
@@ -3051,7 +3217,6 @@ Call your local emergency services (911) or contact:
           repostsCount: 0
         };
         
-        // Handle media upload
         if (mediaFile) {
           const mediaData = await compressMedia(mediaFile);
           postData.mediaDataUrl = mediaData.dataUrl;
@@ -3066,7 +3231,6 @@ Call your local emergency services (911) or contact:
         document.getElementById('postAnonymous').checked = false;
         document.getElementById('mediaPreview').innerHTML = '';
         
-        // Reload feed
         await loadFeed();
         
         showSuccess('Post created successfully!');
@@ -3079,8 +3243,6 @@ Call your local emergency services (911) or contact:
     
     /**
      * Compress media file to base64
-     * NOTE: Storing base64 in Firestore is not recommended for production.
-     * Use Firebase Storage instead. This is a workaround for the requirement.
      */
     async function compressMedia(file) {
       return new Promise((resolve, reject) => {
@@ -3088,22 +3250,19 @@ Call your local emergency services (911) or contact:
         
         reader.onload = (e) => {
           if (file.type.startsWith('video/')) {
-            // For videos, just encode to base64 with size check
             const dataUrl = e.target.result;
-            if (dataUrl.length > 2 * 1024 * 1024) { // 2MB limit
+            if (dataUrl.length > 2 * 1024 * 1024) {
               reject(new Error('Video too large. Please choose a file under 2MB.'));
               return;
             }
             resolve({ dataUrl, type: 'video' });
           } else {
-            // For images, compress using canvas
             const img = new Image();
             img.onload = () => {
               const canvas = document.createElement('canvas');
               let width = img.width;
               let height = img.height;
               
-              // Resize if too large
               const maxDimension = 1200;
               if (width > maxDimension || height > maxDimension) {
                 if (width > height) {
@@ -3121,12 +3280,9 @@ Call your local emergency services (911) or contact:
               const ctx = canvas.getContext('2d');
               ctx.drawImage(img, 0, 0, width, height);
               
-              // Compress to JPEG at 0.7 quality
               const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
               
-              // Check size (approximate limit 500KB)
               if (dataUrl.length > 500 * 1024) {
-                // Try lower quality
                 const lowerQuality = canvas.toDataURL('image/jpeg', 0.5);
                 resolve({ dataUrl: lowerQuality, type: 'image' });
               } else {
@@ -3158,16 +3314,13 @@ Call your local emergency services (911) or contact:
         const likes = postData.likes || {};
         
         if (likes[app.currentUser.uid]) {
-          // Unlike
           delete likes[app.currentUser.uid];
         } else {
-          // Like
           likes[app.currentUser.uid] = true;
         }
         
         await updateDoc(postRef, { likes });
         
-        // Update UI
         const postDiv = document.querySelector(`.feed-post[data-post-id="${postId}"]`);
         if (postDiv) {
           const likeBtn = postDiv.querySelector('.post-action-btn');
@@ -3255,7 +3408,6 @@ Call your local emergency services (911) or contact:
         
         const postId = app.currentCommentPostId;
         
-        // Add comment
         await addDoc(collection(app.db, 'feed', postId, 'comments'), {
           authorUid: app.currentUser.uid,
           authorUsername: app.currentUserData.username,
@@ -3263,18 +3415,14 @@ Call your local emergency services (911) or contact:
           createdAt: serverTimestamp()
         });
         
-        // Increment comment count
         await updateDoc(doc(app.db, 'feed', postId), {
           commentsCount: increment(1)
         });
         
-        // Clear input
         document.getElementById('commentInput').value = '';
         
-        // Reload comments
         await showComments(postId);
         
-        // Update comment count in feed
         const postDiv = document.querySelector(`.feed-post[data-post-id="${postId}"]`);
         if (postDiv) {
           const commentBtn = postDiv.querySelectorAll('.post-action-btn')[1];
@@ -3302,7 +3450,6 @@ Call your local emergency services (911) or contact:
         
         const originalPost = postSnap.data();
         
-        // Create repost
         await addDoc(collection(app.db, 'feed'), {
           text: originalPost.text,
           authorUid: app.currentUser.uid,
@@ -3316,12 +3463,10 @@ Call your local emergency services (911) or contact:
           repostsCount: 0
         });
         
-        // Increment repost count
         await updateDoc(postRef, {
           repostsCount: increment(1)
         });
         
-        // Update UI
         const postDiv = document.querySelector(`.feed-post[data-post-id="${postId}"]`);
         if (postDiv) {
           const repostBtn = postDiv.querySelectorAll('.post-action-btn')[2];
@@ -3331,7 +3476,6 @@ Call your local emergency services (911) or contact:
         
         showSuccess('Post shared to your feed!');
         
-        // Reload feed
         await loadFeed();
         
       } catch (error) {
@@ -3346,7 +3490,7 @@ Call your local emergency services (911) or contact:
     function cacheFeedPosts() {
       try {
         const cache = {
-          posts: app.feedPosts.slice(0, 20), // Cache first 20 posts
+          posts: app.feedPosts.slice(0, 20),
           timestamp: Date.now()
         };
         localStorage.setItem('safespace_feed_cache', JSON.stringify(cache));
@@ -3365,7 +3509,6 @@ Call your local emergency services (911) or contact:
         
         const { posts, timestamp } = JSON.parse(cache);
         
-        // Check if cache is less than 5 minutes old
         if (Date.now() - timestamp < 5 * 60 * 1000) {
           app.feedPosts = posts;
         }
@@ -3430,13 +3573,13 @@ Call your local emergency services (911) or contact:
       const exactTime = createdAt.toLocaleString();
       
       entryDiv.innerHTML = `
-        <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center justify-between mb-2" style="flex-wrap: wrap; gap: var(--spacing-md);">
           <div>
             <strong>${exactTime}</strong>
             <span class="text-muted"> (${timeAgo})</span>
             ${entry.moodEmoji ? `<span style="font-size: 24px; margin-left: 0.5rem;">${entry.moodEmoji}</span>` : ''}
           </div>
-          <div class="flex gap-2">
+          <div class="flex gap-2" style="flex-wrap: wrap;">
             ${!entry.sharedToFeed ? `
               <button class="btn btn-secondary btn-sm" onclick="shareToFeed('${entry.id}')">
                 <span class="material-icons">share</span>
@@ -3481,14 +3624,12 @@ Call your local emergency services (911) or contact:
         };
         
         if (app.editingDiaryId) {
-          // Update existing entry
           await updateDoc(
             doc(app.db, 'diary', app.currentUser.uid, 'entries', app.editingDiaryId),
             { text: entryData.text, updatedAt: entryData.updatedAt }
           );
           app.editingDiaryId = null;
         } else {
-          // Create new entry
           await addDoc(
             collection(app.db, 'diary', app.currentUser.uid, 'entries'),
             entryData
@@ -3576,7 +3717,6 @@ Call your local emergency services (911) or contact:
         
         const entry = entrySnap.data();
         
-        // Create anonymous feed post
         await addDoc(collection(app.db, 'feed'), {
           text: entry.text,
           authorUid: null,
@@ -3588,7 +3728,6 @@ Call your local emergency services (911) or contact:
           repostsCount: 0
         });
         
-        // Mark diary entry as shared
         await updateDoc(
           doc(app.db, 'diary', app.currentUser.uid, 'entries', entryId),
           { sharedToFeed: true }
@@ -3614,7 +3753,6 @@ Call your local emergency services (911) or contact:
     function setupPublicChat() {
       const { collection, query, orderBy, limit, onSnapshot } = window.FirebaseModules;
       
-      // Clean up existing listener
       if (app.publicChatUnsubscribe) {
         app.publicChatUnsubscribe();
       }
@@ -3622,7 +3760,6 @@ Call your local emergency services (911) or contact:
       const messagesContainer = document.getElementById('publicChatMessages');
       messagesContainer.innerHTML = '<div class="skeleton" style="height: 100px;"></div>';
       
-      // Set up real-time listener
       const messagesQuery = query(
         collection(app.db, 'publicChat', 'messages'),
         orderBy('createdAt', 'desc'),
@@ -3632,7 +3769,6 @@ Call your local emergency services (911) or contact:
       app.publicChatUnsubscribe = onSnapshot(messagesQuery, (snapshot) => {
         messagesContainer.innerHTML = '';
         
-        // Reverse to show oldest first
         const messages = [];
         snapshot.forEach(doc => {
           messages.unshift({ id: doc.id, ...doc.data() });
@@ -3647,7 +3783,6 @@ Call your local emergency services (911) or contact:
           renderChatMessage(message, messagesContainer, 'public');
         });
         
-        // Scroll to bottom
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
       });
       
@@ -3665,7 +3800,6 @@ Call your local emergency services (911) or contact:
       
       if (!text) return;
       
-      // Rate limiting
       if (!checkRateLimit('messages', 20)) {
         showError('Too many messages. Please slow down.');
         return;
@@ -3730,7 +3864,6 @@ Call your local emergency services (911) or contact:
       chatDiv.className = 'chat-item';
       chatDiv.dataset.chatId = chat.id;
       
-      // Get other participant name
       const otherUid = chat.participants.find(uid => uid !== app.currentUser.uid);
       const otherUsername = chat.participantNames?.[otherUid] || 'User';
       
@@ -3807,7 +3940,6 @@ Call your local emergency services (911) or contact:
       try {
         const { collection, query, where, getDocs, addDoc, serverTimestamp } = window.FirebaseModules;
         
-        // Check if chat already exists
         const chatsQuery = query(
           collection(app.db, 'chats'),
           where('participants', 'array-contains', app.currentUser.uid)
@@ -3826,7 +3958,6 @@ Call your local emergency services (911) or contact:
         if (existingChatId) {
           openPrivateChat(existingChatId, otherUid, otherUsername);
         } else {
-          // Create new chat
           const chatData = {
             participants: [app.currentUser.uid, otherUid],
             participantNames: {
@@ -3841,7 +3972,6 @@ Call your local emergency services (911) or contact:
           openPrivateChat(chatRef.id, otherUid, otherUsername);
         }
         
-        // Clear search
         document.getElementById('userSearchInput').value = '';
         document.getElementById('userSearchResults').innerHTML = '';
         
@@ -3857,13 +3987,11 @@ Call your local emergency services (911) or contact:
     function openPrivateChat(chatId, otherUid, otherUsername) {
       app.currentChatThread = { id: chatId, otherUid, otherUsername };
       
-      // Update active state
       document.querySelectorAll('.chat-item').forEach(item => {
         item.classList.remove('active');
       });
       document.querySelector(`.chat-item[data-chat-id="${chatId}"]`)?.classList.add('active');
       
-      // Set up chat UI
       const chatMain = document.getElementById('privateChatMain');
       chatMain.innerHTML = `
         <div class="chat-header">
@@ -3887,10 +4015,8 @@ Call your local emergency services (911) or contact:
         </div>
       `;
       
-      // Set up form handler
       document.getElementById('privateChatForm').onsubmit = sendPrivateChatMessage;
       
-      // Set up real-time listener
       setupPrivateChatListener(chatId);
     }
     
@@ -3900,7 +4026,6 @@ Call your local emergency services (911) or contact:
     function setupPrivateChatListener(chatId) {
       const { collection, query, orderBy, limit, onSnapshot } = window.FirebaseModules;
       
-      // Clean up existing listener
       if (app.privateChatUnsubscribe) {
         app.privateChatUnsubscribe();
       }
@@ -3916,7 +4041,6 @@ Call your local emergency services (911) or contact:
       app.privateChatUnsubscribe = onSnapshot(messagesQuery, (snapshot) => {
         messagesContainer.innerHTML = '';
         
-        // Reverse to show oldest first
         const messages = [];
         snapshot.forEach(doc => {
           messages.unshift({ id: doc.id, ...doc.data() });
@@ -3931,7 +4055,6 @@ Call your local emergency services (911) or contact:
           renderChatMessage(message, messagesContainer, 'private');
         });
         
-        // Scroll to bottom
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
       });
       
@@ -3949,7 +4072,6 @@ Call your local emergency services (911) or contact:
       
       if (!text || !app.currentChatThread) return;
       
-      // Rate limiting
       if (!checkRateLimit('messages', 20)) {
         showError('Too many messages. Please slow down.');
         return;
@@ -3960,7 +4082,6 @@ Call your local emergency services (911) or contact:
         
         const chatId = app.currentChatThread.id;
         
-        // Add message
         await addDoc(collection(app.db, 'chats', chatId, 'messages'), {
           senderUid: app.currentUser.uid,
           senderUsername: app.currentUserData.username,
@@ -3968,7 +4089,6 @@ Call your local emergency services (911) or contact:
           createdAt: serverTimestamp()
         });
         
-        // Update chat metadata
         await updateDoc(doc(app.db, 'chats', chatId), {
           lastMessage: text,
           lastUpdated: serverTimestamp()
@@ -4029,7 +4149,7 @@ Call your local emergency services (911) or contact:
       startBtn.classList.add('hidden');
       stopBtn.classList.remove('hidden');
       
-      let phase = 0; // 0: inhale, 1: hold, 2: exhale
+      let phase = 0;
       let count = 4;
       
       const phases = [
@@ -4106,7 +4226,6 @@ Call your local emergency services (911) or contact:
           sharedToFeed: false
         });
         
-        // Reset form
         document.querySelectorAll('.mood-option').forEach(option => {
           option.classList.remove('selected');
         });
@@ -4116,7 +4235,6 @@ Call your local emergency services (911) or contact:
         
         showSuccess('Mood logged!');
         
-        // Reload mood chart
         await loadMoodHistory();
         
       } catch (error) {
@@ -4130,9 +4248,8 @@ Call your local emergency services (911) or contact:
      */
     async function loadMoodHistory() {
       try {
-        const { collection, query, where, orderBy, limit, getDocs, Timestamp } = window.FirebaseModules;
+        const { collection, query, where, orderBy, limit, getDocs } = window.FirebaseModules;
         
-        // Get entries from last 7 days
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
         
@@ -4163,10 +4280,8 @@ Call your local emergency services (911) or contact:
           return;
         }
         
-        // Sort by date
         moodData.sort((a, b) => a.date - b.date);
         
-        // Display chart
         document.getElementById('moodChartContainer').style.display = 'block';
         drawMoodChart(moodData);
         
@@ -4182,7 +4297,6 @@ Call your local emergency services (911) or contact:
       const canvas = document.getElementById('moodChart');
       const ctx = canvas.getContext('2d');
       
-      // Clear canvas
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       
       if (data.length === 0) return;
@@ -4191,24 +4305,20 @@ Call your local emergency services (911) or contact:
       const chartWidth = canvas.width - 2 * padding;
       const chartHeight = canvas.height - 2 * padding;
       
-      // Draw axes
-      ctx.strokeStyle = '#CED4DA';
+      ctx.strokeStyle = '#D1D5DB';
       ctx.lineWidth = 2;
       
-      // Y axis
       ctx.beginPath();
       ctx.moveTo(padding, padding);
       ctx.lineTo(padding, canvas.height - padding);
       ctx.stroke();
       
-      // X axis
       ctx.beginPath();
       ctx.moveTo(padding, canvas.height - padding);
       ctx.lineTo(canvas.width - padding, canvas.height - padding);
       ctx.stroke();
       
-      // Draw Y axis labels
-      ctx.fillStyle = '#4B5B6A';
+      ctx.fillStyle = '#6B7280';
       ctx.font = '12px Inter';
       ctx.textAlign = 'right';
       
@@ -4218,9 +4328,8 @@ Call your local emergency services (911) or contact:
         ctx.fillText(moodLabels[i], padding - 10, y + 5);
       }
       
-      // Plot data points and line
-      ctx.strokeStyle = '#085FAD';
-      ctx.fillStyle = '#085FAD';
+      ctx.strokeStyle = '#0066CC';
+      ctx.fillStyle = '#0066CC';
       ctx.lineWidth = 2;
       
       const xStep = chartWidth / (data.length - 1 || 1);
@@ -4236,14 +4345,12 @@ Call your local emergency services (911) or contact:
           ctx.lineTo(x, y);
         }
         
-        // Draw point
         ctx.fillRect(x - 3, y - 3, 6, 6);
       });
       
       ctx.stroke();
       
-      // Draw X axis labels (dates)
-      ctx.fillStyle = '#4B5B6A';
+      ctx.fillStyle = '#6B7280';
       ctx.textAlign = 'center';
       
       data.forEach((point, index) => {
@@ -4307,7 +4414,6 @@ Call your local emergency services (911) or contact:
           sharedToFeed: false
         });
         
-        // Reset form
         document.getElementById('reframeCategory').value = '';
         document.getElementById('reframeResponse').value = '';
         document.getElementById('reframePrompts').classList.add('hidden');
@@ -4376,7 +4482,6 @@ Call your local emergency services (911) or contact:
         return;
       }
       
-      // Request reauthentication
       app.reauthCallback = async () => {
         try {
           const { updateEmail } = window.FirebaseModules;
@@ -4409,7 +4514,6 @@ Call your local emergency services (911) or contact:
         return;
       }
       
-      // Request reauthentication
       app.reauthCallback = async () => {
         try {
           const { updatePassword } = window.FirebaseModules;
@@ -4450,7 +4554,6 @@ Call your local emergency services (911) or contact:
         document.getElementById('reauthPassword').value = '';
         document.getElementById('reauthError').classList.add('hidden');
         
-        // Execute callback
         if (app.reauthCallback) {
           await app.reauthCallback();
           app.reauthCallback = null;
@@ -4468,9 +4571,8 @@ Call your local emergency services (911) or contact:
      */
     async function exportUserData() {
       try {
-        const { collection, getDocs } = window.FirebaseModules;
+        const { collection, getDocs, query, where } = window.FirebaseModules;
         
-        // Collect all user data
         const userData = {
           username: app.currentUserData.username,
           email: app.currentUser.email,
@@ -4479,7 +4581,6 @@ Call your local emergency services (911) or contact:
           posts: []
         };
         
-        // Get diary entries
         const diarySnapshot = await getDocs(
           collection(app.db, 'diary', app.currentUser.uid, 'entries')
         );
@@ -4493,8 +4594,6 @@ Call your local emergency services (911) or contact:
           });
         });
         
-        // Get feed posts by user
-        const { query, where } = window.FirebaseModules;
         const postsQuery = query(
           collection(app.db, 'feed'),
           where('authorUid', '==', app.currentUser.uid)
@@ -4510,7 +4609,6 @@ Call your local emergency services (911) or contact:
           });
         });
         
-        // Download as JSON
         const dataStr = JSON.stringify(userData, null, 2);
         const dataBlob = new Blob([dataStr], { type: 'application/json' });
         const url = URL.createObjectURL(dataBlob);
@@ -4745,13 +4843,11 @@ Call your local emergency services (911) or contact:
       try {
         const { doc, updateDoc, collection, addDoc, serverTimestamp } = window.FirebaseModules;
         
-        // Disable user
         await updateDoc(doc(app.db, 'users', uid), {
           disabled: true,
           blockedReason: reason
         });
         
-        // Add to blocked identifiers
         const fingerprint = generateDeviceFingerprint();
         await addDoc(collection(app.db, 'blockedIdentifiers'), {
           fingerprintHash: fingerprint,
@@ -4806,7 +4902,6 @@ Call your local emergency services (911) or contact:
       try {
         const { doc, deleteDoc, collection, query, where, getDocs } = window.FirebaseModules;
         
-        // Delete diary entries
         const diarySnapshot = await getDocs(
           collection(app.db, 'diary', uid, 'entries')
         );
@@ -4815,7 +4910,6 @@ Call your local emergency services (911) or contact:
           await deleteDoc(entryDoc.ref);
         }
         
-        // Delete user's feed posts
         const postsQuery = query(
           collection(app.db, 'feed'),
           where('authorUid', '==', uid)
@@ -4824,7 +4918,6 @@ Call your local emergency services (911) or contact:
         const postsSnapshot = await getDocs(postsQuery);
         
         for (const postDoc of postsSnapshot.docs) {
-          // Delete comments first
           const commentsSnapshot = await getDocs(
             collection(app.db, 'feed', postDoc.id, 'comments')
           );
@@ -4833,11 +4926,9 @@ Call your local emergency services (911) or contact:
             await deleteDoc(commentDoc.ref);
           }
           
-          // Delete post
           await deleteDoc(postDoc.ref);
         }
         
-        // Delete user document
         await deleteDoc(doc(app.db, 'users', uid));
         
         await logAdminAction('delete', uid, username, 'Account and content permanently deleted');
@@ -4963,7 +5054,6 @@ Call your local emergency services (911) or contact:
     
     /**
      * Escape HTML to prevent XSS
-     * All user content is escaped before rendering
      */
     function escapeHtml(text) {
       if (typeof text !== 'string') return '';
@@ -5002,19 +5092,16 @@ Call your local emergency services (911) or contact:
     
     /**
      * Rate limiting check
-     * NOTE: This is client-side only. For production, implement server-side rate limiting.
      */
     function checkRateLimit(type, limit) {
       const now = Date.now();
       const limiter = app.rateLimiter[type];
       
-      // Reset counter if time window passed
       if (now > limiter.resetTime) {
         limiter.count = 0;
-        limiter.resetTime = now + 60000; // 1 minute window
+        limiter.resetTime = now + 60000;
       }
       
-      // Check limit
       if (limiter.count >= limit) {
         return false;
       }
@@ -5087,6 +5174,13 @@ Call your local emergency services (911) or contact:
       
       document.getElementById('logoutBtn')?.addEventListener('click', signOutUser);
       document.getElementById('mobileMenuBtn')?.addEventListener('click', toggleMobileMenu);
+      
+      // Close mobile menu when clicking sidebar backdrop
+      document.getElementById('sidebar')?.addEventListener('click', (e) => {
+        if (e.target === e.currentTarget && window.innerWidth <= 768) {
+          closeMobileMenu();
+        }
+      });
       
       // Feed
       document.getElementById('createPostBtn')?.addEventListener('click', () => {
@@ -5198,6 +5292,25 @@ Call your local emergency services (911) or contact:
         });
       });
       
+      // Scroll to top button
+      const scrollTopBtn = document.getElementById('scrollTopBtn');
+      if (scrollTopBtn) {
+        scrollTopBtn.addEventListener('click', () => {
+          window.scrollTo({
+            top: 0,
+            behavior: 'smooth'
+          });
+        });
+        
+        window.addEventListener('scroll', () => {
+          if (window.scrollY > 300) {
+            scrollTopBtn.classList.add('visible');
+          } else {
+            scrollTopBtn.classList.remove('visible');
+          }
+        });
+      }
+      
       // Detect online/offline
       window.addEventListener('online', () => {
         showSuccess('Connection restored');
@@ -5212,7 +5325,6 @@ Call your local emergency services (911) or contact:
     // INITIALIZE APP ON LOAD
     // ═══════════════════════════════════════════════════════════════════
     
-    // Start initialization when DOM is ready
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', initializeApp);
     } else {
