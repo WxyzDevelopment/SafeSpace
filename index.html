@@ -779,18 +779,37 @@
       color: var(--text-dark);
     }
     
-    .post-media {
-      margin-bottom: var(--spacing-md);
-      border-radius: var(--border-radius-lg);
-      overflow: hidden;
-    }
-    
-    .post-media img,
-    .post-media video {
-      width: 100%;
-      height: auto;
-      display: block;
-    }
+/* ═══════════════════════════════════════════════════════════════════
+   POST MEDIA - RESPONSIVE & SMALLER DISPLAY
+   ═══════════════════════════════════════════════════════════════════ */
+
+.post-media {
+  margin: var(--spacing-md) auto;
+  border-radius: var(--border-radius-lg);
+  overflow: hidden;
+  max-width: 400px; /* ✅ Limit overall media width */
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  justify-content: center;
+  background: var(--gray-100);
+}
+
+.post-media img,
+.post-media video {
+  width: 100%;
+  height: auto;
+  display: block;
+  object-fit: cover;
+  border-radius: var(--border-radius-lg);
+}
+
+/* ✅ Mobile optimization */
+@media (max-width: 768px) {
+  .post-media {
+    max-width: 90%; /* Slightly smaller on mobile */
+  }
+}
+
     
     .post-actions {
       display: flex;
