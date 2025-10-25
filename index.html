@@ -1764,6 +1764,96 @@
   }
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+   FOOTER (Clean, Fixed at Bottom, Two-Line Layout)
+   ═══════════════════════════════════════════════════════════════════ */
+
+.app-footer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--white);
+  border-top: 1px solid var(--gray-200);
+  text-align: center;
+  padding: 0.75rem 1rem;
+  z-index: 999;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.footer-content {
+  max-width: 100%;
+  margin: 0 auto;
+  line-height: 1.5;
+}
+
+.footer-text {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  white-space: nowrap;
+}
+
+.footer-copy {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  margin-top: 2px;
+}
+
+.footer-heart {
+  color: var(--danger);
+  animation: heartbeat 1.5s ease-in-out infinite;
+}
+
+@keyframes heartbeat {
+  0%, 100% { transform: scale(1); }
+  10%, 30% { transform: scale(1.1); }
+  20%, 40% { transform: scale(1); }
+}
+
+.footer-brand {
+  font-weight: 600;
+  color: var(--primary-blue);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+
+.footer-brand:hover {
+  color: var(--primary-blue-dark);
+}
+
+/* Prevent overlap with fixed footer */
+body {
+  padding-bottom: 70px;
+}
+
+/* Mobile View Fix */
+@media (max-width: 768px) {
+  .app-footer {
+    padding: 0.5rem;
+  }
+
+  .footer-text {
+    font-size: var(--font-size-xs);
+    white-space: normal;
+  }
+
+  .footer-copy {
+    font-size: 0.7rem;
+  }
+
+  body {
+    padding-bottom: 85px;
+  }
+}
+
+
+
+
   </style>
 </head>
 <body>
@@ -2342,6 +2432,19 @@
         </div>
       </div>
       
+      <!-- Footer -->
+      <footer class="app-footer">
+        <div class="footer-content">
+          <div class="footer-text">
+            Made with <span class="footer-heart">♥</span> By 
+            <a href="#" class="footer-brand">Wxyz Development</a>
+          </div>
+          <div class="footer-text" style="margin-top: var(--spacing-xs); font-size: var(--font-size-xs);">
+            © 2024 Safespace. Your mental health matters.
+          </div>
+        </div>
+      </footer>
+
     </main>
   </div>
 
@@ -5437,7 +5540,7 @@ async function markChatAsRead(chatId) {
       body.classList.toggle('menu-open');
     });
   });
-  
+
     }
     
     // ═══════════════════════════════════════════════════════════════════
