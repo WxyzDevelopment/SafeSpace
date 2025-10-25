@@ -1851,7 +1851,107 @@ body {
   }
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+   PRIVATE CHAT PAGE - MOBILE VIEW WITH SEARCH BAR (Height Fix)
+   ═══════════════════════════════════════════════════════════════════ */
 
+@media (max-width: 768px) {
+  .chat-container {
+    flex-direction: column;
+    height: auto; /* ✅ Allow natural height */
+    min-height: 100vh; /* Ensures full-screen coverage */
+    border-radius: 0;
+    background: var(--white);
+  }
+
+  /* Sidebar & search */
+  .chat-sidebar {
+    position: relative; /* ✅ Remove fixed layout */
+    width: 100%;
+    background: var(--white);
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 120px); /* ✅ Keeps sidebar compact */
+    overflow-y: auto;
+    border-bottom: 1px solid var(--gray-200);
+  }
+
+  .chat-search {
+    padding: var(--spacing-md);
+    border-bottom: 1px solid var(--gray-200);
+    background: var(--white);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+
+  .chat-list {
+    flex: 1;
+    overflow-y: auto;
+    padding-bottom: var(--spacing-md);
+  }
+
+  /* Chat main area */
+  .chat-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    height: auto;
+    min-height: calc(100vh - 150px);
+    background: var(--gray-50);
+  }
+
+  /* Mobile chat header */
+  .chat-mobile-header {
+    display: flex;
+    align-items: center;
+    background: var(--white);
+    border-bottom: 1px solid var(--gray-200);
+    padding: 0.75rem 1rem;
+    gap: var(--spacing-md);
+    position: sticky;
+    top: 0;
+    z-index: 20;
+  }
+
+  .chat-back-btn {
+    background: none;
+    border: none;
+    color: var(--text-dark);
+    font-size: 24px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+  }
+
+  .chat-mobile-user {
+    font-weight: 600;
+    font-size: var(--font-size-base);
+    color: var(--text-dark);
+  }
+
+  /* Chat messages */
+  .chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--spacing-md);
+    background: var(--gray-50);
+  }
+
+  /* Chat input */
+  .chat-input-container {
+    border-top: 1px solid var(--gray-200);
+    background: var(--white);
+    padding: 0.75rem;
+  }
+
+  /* Empty state */
+  #noChatSelected {
+    padding: var(--spacing-xl);
+    text-align: center;
+  }
+}
 
 
   </style>
@@ -2176,7 +2276,7 @@ body {
       </div>
       
       <!-- PRIVATE CHAT PAGE -->
-      <div id="privateChatPage" class="page-content hidden">
+      <!-- <div id="privateChatPage" class="page-content hidden">
         <div class="chat-container">
           <div class="chat-sidebar" id="chatSidebar">
             <div class="chat-search">
@@ -2184,7 +2284,7 @@ body {
               <div id="userSearchResults" style="margin-top: var(--spacing-md);"></div>
             </div>
             <div class="chat-list" id="privateChatList">
-              <!-- Chat threads will be loaded here -->
+             
             </div>
           </div>
           
@@ -2196,8 +2296,70 @@ body {
             </div>
           </div>
         </div>
-      </div>
+      </div> -->
       
+      <!-- PRIVATE CHAT PAGE -->
+<div id="privateChatPage" class="page-content hidden">
+  <div class="chat-container">
+
+    <!-- SIDEBAR: Chat List -->
+    <div class="chat-sidebar" id="chatSidebar">
+      
+      <!-- Search (Visible on both desktop & mobile) -->
+      <div class="chat-search chat-mobile-search">
+        <input
+          type="text"
+          id="userSearchInput"
+          class="input-field"
+          placeholder="Search users..."
+        />
+        <div id="userSearchResults" style="margin-top: var(--spacing-md);"></div>
+      </div>
+
+      <div class="chat-list" id="privateChatList">
+        <!-- Chat threads will be loaded here -->
+      </div>
+    </div>
+
+    <!-- MAIN CHAT AREA -->
+    <div class="chat-main" id="privateChatMain">
+
+      <!-- Mobile Header -->
+      <div class="chat-mobile-header" id="chatMobileHeader">
+        <button class="chat-back-btn" id="chatBackBtn">
+          <span class="material-icons">arrow_back</span>
+        </button>
+        <div class="chat-mobile-user" id="chatMobileUser">Private Chat</div>
+      </div>
+
+      <!-- Default Empty State -->
+      <div class="empty-state" id="noChatSelected">
+        <span class="material-icons">chat_bubble_outline</span>
+        <h3 class="empty-state-title">No Chat Selected</h3>
+        <p>Search for a user to start a private conversation</p>
+      </div>
+
+      <!-- Chat Messages -->
+      <div class="chat-messages hidden" id="chatMessages"></div>
+
+      <!-- Chat Input -->
+      <div class="chat-input-container hidden" id="chatInputContainer">
+        <form class="chat-input-form" id="privateChatForm">
+          <input
+            type="text"
+            id="privateMessageInput"
+            class="chat-input"
+            placeholder="Type a message..."
+          />
+          <button type="submit" class="btn btn-primary btn-icon">
+            <span class="material-icons">send</span>
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
       <!-- HEALING TOOLS PAGE -->
       <div id="healingToolsPage" class="page-content hidden">
         <div class="card">
